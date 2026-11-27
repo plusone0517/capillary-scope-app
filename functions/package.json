@@ -1,1 +1,22 @@
-{"dependencies":{"firebase-admin":"^12.0.0","firebase-functions":"^5.0.0"},"description":"毛細血管分析アプリ Cloud Functions（受け取りトークンの発行・検証）","devDependencies":{"typescript":"^5.6.0"},"engines":{"node":"20"},"main":"lib/index.js","name":"capillary-scope-functions","private":true,"scripts":{"build":"tsc","deploy":"firebase deploy --only functions","serve":"npm run build && firebase emulators:start --only functions"},"version":"0.1.0"}
+{
+ "dependencies": {
+  "firebase-admin": "^12.0.0",
+  "firebase-functions": "^5.0.0"
+ },
+ "description": "毛細血管分析アプリ Cloud Functions（受け取りトークンの発行・検証）",
+ "devDependencies": {
+  "typescript": "^5.6.0"
+ },
+ "engines": {
+  "node": "22"
+ },
+ "main": "lib/index.js",
+ "name": "capillary-scope-functions",
+ "private": true,
+ "scripts": {
+  "build": "tsc",
+  "deploy": "firebase deploy --only functions",
+  "serve": "npm run build && firebase emulators:start --only functions"
+ },
+ "version": "0.1.0"
+}
