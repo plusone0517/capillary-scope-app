@@ -1,5 +1,8 @@
 /* 毛細血管分析アプリ（院内用）基本スタイル。
-   院内スタッフ用だが、ボタン等の操作部は大きめ（高さ48px以上）を基本にする。 */
+   院内スタッフ用だが、ボタン等の操作部は大きめ（高さ48px以上）を基本にする。
+   色は theme.css の CSS 変数（医療系パレット）で一元管理し、ここでは var() で参照する。
+   基調ネイビーティール #0D3B4C / 操作色ティール #12808A / 赤は臨床フラグと
+   破壊的操作だけ（--alert）。 */
 
 * {
   box-sizing: border-box;
@@ -9,8 +12,8 @@ body {
   margin: 0;
   font-family: "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Noto Sans JP",
     "Yu Gothic", sans-serif;
-  color: #21312b;
-  background: #f4f6f3;
+  color: var(--text);
+  background: var(--bg);
   font-size: 16px;
   line-height: 1.6;
 }
@@ -29,24 +32,33 @@ button:disabled {
 }
 
 .primary-button {
-  background: #2e6b4f;
+  background: var(--accent);
   color: #fff;
-  border: 1px solid #2e6b4f;
+  border: 1px solid var(--accent);
+  font-weight: 600;
 }
 
 .secondary-button {
-  background: #fff;
-  color: #21312b;
-  border: 1px solid #9db3a8;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
 }
 
 input {
   font: inherit;
   padding: 10px 12px;
-  border: 1px solid #b9c6bf;
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
   width: 100%;
   min-height: 48px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+input:focus {
+  border-color: var(--accent);
+  outline: 3px solid var(--accent-bg);
+  outline-offset: 0;
 }
 
 /* ログイン画面 */
@@ -61,9 +73,10 @@ input {
 
 .login-card,
 .notice-card {
-  background: #fff;
-  border: 1px solid #d8e0da;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 12px;
+  box-shadow: var(--shadow-card);
   padding: 32px;
   max-width: 440px;
   width: 100%;
@@ -73,6 +86,8 @@ input {
 .notice-card h1 {
   font-size: 22px;
   margin: 0 0 8px;
+  color: var(--heading);
+  letter-spacing: 0.02em;
 }
 
 .login-card label {
@@ -87,13 +102,13 @@ input {
 }
 
 .login-note {
-  color: #52645b;
+  color: var(--dim);
   margin: 0;
 }
 
 .login-error {
-  color: #a4271f;
-  background: #fbeae8;
+  color: var(--alert);
+  background: var(--alert-bg);
   border-radius: 8px;
   padding: 10px 12px;
 }
@@ -105,20 +120,24 @@ input {
   align-items: center;
   gap: 16px;
   padding: 12px 24px;
-  background: #fff;
-  border-bottom: 1px solid #d8e0da;
+  background: var(--navy);
+  color: #fff;
+  border-bottom: 3px solid var(--accent);
   flex-wrap: wrap;
 }
 
 .app-header h1 {
   font-size: 20px;
   margin: 0;
+  color: #fff;
+  letter-spacing: 0.03em;
 }
 
 .header-user {
   display: flex;
   align-items: center;
   gap: 12px;
+  color: rgba(255, 255, 255, 0.88);
 }
 
 .app-main {
@@ -130,15 +149,18 @@ input {
 }
 
 .panel {
-  background: #fff;
-  border: 1px solid #d8e0da;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 12px;
+  box-shadow: var(--shadow-card);
   padding: 24px;
 }
 
 .panel h2 {
   font-size: 18px;
   margin: 0 0 8px;
+  color: var(--heading);
+  letter-spacing: 0.02em;
 }
 
 .action-row {
@@ -157,14 +179,14 @@ input {
 }
 
 .pattern-list li {
-  border: 1px solid #e2e8e3;
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 14px;
 }
 
 .pattern-feature {
   display: block;
-  color: #52645b;
+  color: var(--dim);
   font-size: 14px;
 }
 
@@ -173,8 +195,8 @@ input {
   margin-left: 8px;
   padding: 1px 8px;
   border-radius: 999px;
-  background: #fbeae8;
-  color: #a4271f;
+  background: var(--alert-bg);
+  color: var(--alert);
   font-size: 12px;
   font-weight: 600;
 }

@@ -22,7 +22,7 @@ export function PatternDiagram({
       role="img"
       aria-label={title}
       className={className}
-      style={{ backgroundColor: "#fffdf8" }}
+      style={{ backgroundColor: "#ffffff" }}
     >
       {diagram.paths.map((p, i) => (
         <path

@@ -262,7 +262,7 @@ export function ReportBody({
               controls
               playsInline
               aria-label="観察動画"
-              className="aspect-video w-full rounded-[var(--radius)] border border-[var(--border)] bg-black"
+              className="aspect-video w-full rounded-[var(--radius)] border border-[var(--border)] bg-[var(--video-bg)]"
             />
             {obs.video.durationSec != null && (
               <p className="r-small mt-1">長さ：約{obs.video.durationSec.toFixed(0)}秒</p>
@@ -437,9 +437,9 @@ export function ReceiveQr({
   return (
     <section
       aria-label="受け取りQRコード"
-      className="no-print flex flex-col items-center gap-3 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-5"
+      className="no-print flex flex-col items-center gap-3 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-card)]"
     >
-      <h2 className="text-xl font-bold text-[var(--text)]">受け取りQRコード</h2>
+      <h2 className="text-xl font-bold text-[var(--heading)]">受け取りQRコード</h2>
       {qrDataUrl ? (
         <img
           src={qrDataUrl}

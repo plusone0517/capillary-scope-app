@@ -358,7 +358,7 @@ export function CaptureMediaDisplay({
       className={`sticky top-0 z-30 -mx-4 flex flex-col gap-2 border-b border-[var(--border)] bg-[var(--bg)] px-4 py-2 shadow-[0_8px_16px_-12px_rgba(0,0,0,0.4)] sm:-mx-6 sm:px-6 lg:static lg:z-auto lg:mx-0 lg:min-h-0 lg:gap-3 lg:border-b-0 lg:bg-transparent lg:px-0 lg:py-0 lg:shadow-none ${className}`}
     >
       {support.kind === "ok" && (
-        <div className="relative overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-black lg:min-h-0 lg:flex-1">
+        <div className="relative overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-[var(--video-bg)] lg:min-h-0 lg:flex-1">
           <video
             ref={videoRef}
             playsInline
@@ -435,7 +435,7 @@ export function CaptureMediaDisplay({
             controls
             playsInline
             aria-label="取り込み済みの観察動画"
-            className="aspect-video w-full rounded-[var(--radius)] border border-[var(--border)] bg-black lg:max-h-[30dvh]"
+            className="aspect-video w-full rounded-[var(--radius)] border border-[var(--border)] bg-[var(--video-bg)] lg:max-h-[30dvh]"
           />
           <button
             type="button"
@@ -543,7 +543,7 @@ export function CaptureControls({
               : `この画面を撮影する（あと${MAX_IMAGES - images.length}枚）`}
           </button>
 
-          <div className="flex flex-col gap-3 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
+          <div className="flex flex-col gap-3 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-card)]">
             <h3 className="text-lg font-bold text-[var(--text)]">
               動画の撮影（血流速度の計測用・任意）
             </h3>
@@ -618,7 +618,7 @@ export function CaptureControls({
             controls
             playsInline
             aria-label="取り込み済みの観察動画"
-            className="aspect-video w-full rounded-[var(--radius)] border border-[var(--border)] bg-black"
+            className="aspect-video w-full rounded-[var(--radius)] border border-[var(--border)] bg-[var(--video-bg)]"
           />
           <button
             type="button"
