@@ -125,7 +125,7 @@ export interface Observation {
   flowImpression: string;
   /** 色の印象コード（bright_red / dark_red / pale）。 */
   colorImpression: string;
-  /** 形のパターンのコード（20種から複数選択、1件以上）。 */
+  /** 形のパターンのコード（28種から複数選択、1件以上）。 */
   patterns: string[];
   clinicalFlags: ClinicalFlags;
   /** 前回との比較コード（improved / same / worse）。初回は null。 */
