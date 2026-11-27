@@ -32,6 +32,8 @@ fileToCapturedVideo,
 type CapturedImage,
 type CapturedVideo,
 } from "./camera";
+import { LoadingState } from "./States";
+import { LogoMark } from "./Logo";
 import {
 capillaryChangeLabels,
 capillaryClinicalFlagLabels,
@@ -65,9 +67,12 @@ function loadTrialMode(): boolean {
 function TrialModeToggle({
   trialMode,
   onChange,
+  compact = false,
 }: {
   trialMode: boolean;
   onChange: (next: boolean) => void;
+  /** ヘッダーのナビに収める小さい表示にする。 */
+  compact?: boolean;
 }) {
   return (
     <button
@@ -76,7 +81,11 @@ function TrialModeToggle({
       aria-checked={trialMode}
       aria-label="試験モード"
       onClick={() => onChange(!trialMode)}
-      className={`flex min-h-14 items-center gap-3 rounded-full border-2 px-4 text-lg font-bold ${
+      className={`flex items-center rounded-full border-2 font-bold ${
+        compact
+          ? "min-h-11 gap-2 whitespace-nowrap px-2.5 text-sm sm:gap-3 sm:px-3 sm:text-base"
+          : "min-h-14 gap-3 px-4 text-lg"
+      } ${
         trialMode
           ? "border-[var(--accent)] bg-[var(--accent)] text-white"
           : "border-[var(--border)] bg-[var(--surface)] text-[var(--text)]"
@@ -84,18 +93,174 @@ function TrialModeToggle({
     >
       <span
         aria-hidden="true"
-        className={`relative h-7 w-12 shrink-0 rounded-full ${
-          trialMode ? "bg-white/30" : "bg-[var(--paper)]"
-        }`}
+        className={`relative shrink-0 rounded-full ${
+          compact ? "h-6 w-10" : "h-7 w-12"
+        } ${trialMode ? "bg-white/30" : "bg-[var(--paper)]"}`}
       >
         <span
-          className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow ${
-            trialMode ? "right-0.5" : "left-0.5"
-          }`}
+          className={`absolute top-0.5 rounded-full bg-white shadow ${
+            compact ? "h-5 w-5" : "h-6 w-6"
+          } ${trialMode ? "right-0.5" : "left-0.5"}`}
         />
       </span>
       試験モード：{trialMode ? "ON" : "OFF"}
     </button>
+  );
+}
+
+/* ================= 共通ナビ・ステップ表示 ================= */
+
+/**
+ * 全画面共通のナビ（画面上部に追随）。主要メニューと現在地、
+ * 試験モードの切り替えをここに集約する。
+ */
+function AppNav({
+  view,
+  go,
+  trialMode,
+  onTrialModeChange,
+  wide,
+}: {
+  view: View;
+  go: (v: View) => void;
+  trialMode: boolean;
+  onTrialModeChange: (next: boolean) => void;
+  wide: boolean;
+}) {
+  const itemClass = (active: boolean) =>
+    `min-h-11 shrink-0 whitespace-nowrap rounded-full px-3 text-sm font-bold sm:px-4 sm:text-base ${
+      active
+        ? "bg-[var(--accent)] text-white"
+        : "text-[var(--text)] hover:bg-[var(--paper)]"
+    }`;
+  return (
+    <div className="sticky top-0 z-50 border-b border-[var(--border)] bg-[var(--surface)]/95 shadow-[0_1px_8px_rgba(13,59,76,0.08)] backdrop-blur">
+      <div
+        className={`mx-auto flex h-14 w-full items-center gap-2 overflow-x-auto px-3 sm:px-6 ${
+          wide ? "max-w-[1680px]" : "max-w-6xl"
+        }`}
+      >
+        <nav aria-label="主要メニュー" className="flex items-center gap-1.5 sm:gap-2">
+          <button
+            type="button"
+            aria-current={view.kind === "list" ? "page" : undefined}
+            onClick={() => go({ kind: "list" })}
+            className={itemClass(view.kind === "list")}
+          >
+            一覧
+          </button>
+          <button
+            type="button"
+            aria-current={view.kind === "new" ? "page" : undefined}
+            onClick={() => go({ kind: "new" })}
+            className={itemClass(view.kind === "new")}
+          >
+            新しい観察
+          </button>
+        </nav>
+        <div className="ml-auto shrink-0">
+          <TrialModeToggle
+            trialMode={trialMode}
+            onChange={onTrialModeChange}
+            compact
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 観察の入力フロー（新しい観察・編集）のステップ定義。 */
+const OBS_STEPS = [
+  { label: "撮影", targetId: "obs-step-capture" },
+  { label: "所見", targetId: "obs-step-findings" },
+  { label: "確認・レポート", targetId: "obs-step-confirm" },
+] as const;
+
+/**
+ * スクロール位置に応じて、今いるステップを返す。
+ * 各セクションが画面中央の帯に入ったかどうかで判定する。
+ */
+function useActiveStep(targetIds: string[]): number {
+  const [active, setActive] = useState(0);
+  const key = targetIds.join("|");
+  useEffect(() => {
+    const ids = key.split("|");
+    const elements = ids
+      .map((id) => document.getElementById(id))
+      .filter((el): el is HTMLElement => el != null);
+    if (elements.length === 0) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const idx = elements.indexOf(entry.target as HTMLElement);
+          if (idx >= 0) setActive(idx);
+        }
+      },
+      { rootMargin: "-30% 0px -60% 0px", threshold: 0 },
+    );
+    elements.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, [key]);
+  return active;
+}
+
+/**
+ * 入力フローのステップ表示（画面上部に追随）。
+ * 押すとそのセクションへスクロール移動する。
+ */
+function StepNav() {
+  const active = useActiveStep(OBS_STEPS.map((s) => s.targetId));
+  return (
+    <nav
+      aria-label="入力の進み具合"
+      className="sticky top-14 z-40 -mx-4 border-b border-[var(--border)] bg-[var(--bg)]/95 px-4 shadow-[0_8px_16px_-12px_rgba(13,59,76,0.35)] backdrop-blur sm:-mx-6 sm:px-6"
+    >
+      <ol className="flex h-[52px] items-center gap-1 overflow-x-auto sm:gap-2">
+        {OBS_STEPS.map((step, i) => {
+          const isActive = i === active;
+          const isDone = i < active;
+          return (
+            <li key={step.targetId} className="flex shrink-0 items-center gap-1 sm:gap-2">
+              <button
+                type="button"
+                aria-current={isActive ? "step" : undefined}
+                onClick={() =>
+                  document
+                    .getElementById(step.targetId)
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" })
+                }
+                className={`flex min-h-11 items-center gap-2 whitespace-nowrap rounded-full px-3 text-base font-bold sm:px-4 sm:text-lg ${
+                  isActive
+                    ? "bg-[var(--accent)] text-white"
+                    : "text-[var(--dim)] hover:bg-[var(--paper)]"
+                }`}
+              >
+                <span
+                  aria-hidden
+                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
+                    isActive
+                      ? "bg-white text-[var(--accent-strong)]"
+                      : isDone
+                        ? "bg-[var(--accent)] text-white"
+                        : "border-2 border-[var(--border-strong)] text-[var(--dim)]"
+                  }`}
+                >
+                  {isDone ? "✓" : i + 1}
+                </span>
+                {step.label}
+              </button>
+              {i < OBS_STEPS.length - 1 && (
+                <span aria-hidden className="text-[var(--dim)]">
+                  ›
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
   );
 }
 
@@ -190,14 +355,23 @@ function findingsToPayload(f: FindingsState) {
 
 /* ================= 一覧 ================= */
 
+/** 一覧カードに出す形のパターンの要約（先頭3件＋ほかN件）。 */
+function patternSummary(codes: string[]): string | null {
+  const names = codes
+    .map((c) => capillaryPatternByCode[c]?.name)
+    .filter((n): n is string => Boolean(n));
+  if (names.length === 0) return null;
+  return names.length <= 3
+    ? names.join("、")
+    : `${names.slice(0, 3).join("、")} ほか${names.length - 3}件`;
+}
+
 function ListScreen({
   go,
   trialMode,
-  onTrialModeChange,
 }: {
   go: (v: View) => void;
   trialMode: boolean;
-  onTrialModeChange: (next: boolean) => void;
 }) {
   const [search, setSearch] = useState("");
   const [submittedSearch, setSubmittedSearch] = useState("");
@@ -242,16 +416,13 @@ function ListScreen({
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-bold tracking-wide text-[var(--heading)]">観察レポート一覧</h1>
-        <div className="flex flex-wrap items-center gap-3">
-          <TrialModeToggle trialMode={trialMode} onChange={onTrialModeChange} />
-          <button
-            type="button"
-            onClick={() => go({ kind: "new" })}
-            className="min-h-14 rounded-[var(--radius)] bg-[var(--accent)] px-6 text-xl font-bold text-white"
-          >
-            新しい観察をはじめる
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => go({ kind: "new" })}
+          className="min-h-16 rounded-[var(--radius)] bg-[var(--accent)] px-7 text-xl font-bold text-white shadow-[var(--shadow-card)]"
+        >
+          新しい観察をはじめる
+        </button>
       </div>
 
       {trialMode && (
@@ -269,27 +440,30 @@ function ListScreen({
         </div>
       )}
 
-      <form
-        className="flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setSubmittedSearch(search.trim());
-        }}
-      >
-        <input
-          aria-label="対象者名またはIDで検索"
-          className="min-h-14 flex-1 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-4 text-lg text-[var(--text)]"
-          placeholder="対象者名・IDで検索"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <button
-          type="submit"
-          className="min-h-14 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-5 text-lg font-medium text-[var(--text)]"
+      <div className="sticky top-14 z-30 -mx-4 bg-[var(--bg)]/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
+        <form
+          className="flex gap-2"
+          role="search"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setSubmittedSearch(search.trim());
+          }}
         >
-          検索
-        </button>
-      </form>
+          <input
+            aria-label="対象者名またはIDで検索"
+            className="min-h-16 flex-1 rounded-[var(--radius)] border-2 border-[var(--border-strong)] bg-[var(--surface)] px-4 text-xl text-[var(--text)] shadow-[var(--shadow-card)]"
+            placeholder="対象者名・IDで検索"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <button
+            type="submit"
+            className="min-h-16 rounded-[var(--radius)] bg-[var(--accent)] px-6 text-xl font-bold text-white"
+          >
+            検索
+          </button>
+        </form>
+      </div>
 
       <p className="text-base text-[var(--dim)]">
         各レポートの「比べる」を2件押すと、ビフォアアフターで比較できます（同じ対象者の2件）。
@@ -331,19 +505,29 @@ function ListScreen({
         </div>
       )}
 
-      {list.isPending && <p className="text-lg text-[var(--dim)]">読み込んでいます…</p>}
+      {list.isPending && <LoadingState />}
       {list.error && (
         <p role="alert" className="text-lg text-[var(--alert)]">
           一覧の読み込みに失敗しました。もう一度お試しください。
         </p>
       )}
       {list.data && list.data.observations.length === 0 && (
-        <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-6 text-center">
-          <p className="text-lg text-[var(--text)]">
+        <div className="flex flex-col items-center gap-4 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-6 py-12 text-center shadow-[var(--shadow-card)]">
+          <LogoMark size={56} />
+          <p className="max-w-xl text-xl leading-relaxed text-[var(--text)]">
             {submittedSearch
               ? "条件に合う観察レポートはありません。"
               : "まだ観察レポートがありません。「新しい観察をはじめる」から最初の観察を記録してください。"}
           </p>
+          {!submittedSearch && (
+            <button
+              type="button"
+              onClick={() => go({ kind: "new" })}
+              className="min-h-16 rounded-[var(--radius)] bg-[var(--accent)] px-7 text-xl font-bold text-white"
+            >
+              新しい観察をはじめる
+            </button>
+          )}
         </div>
       )}
       {list.data && list.data.observations.length > 0 && (
@@ -381,9 +565,25 @@ function ListScreen({
                   </span>
                   <span className="text-base text-[var(--dim)]">
                     {formatDateTime(obs.observedAt)}／
-                    {capillaryFingerLabels[obs.finger] ?? obs.finger}／形のパターン
-                    {obs.patternCount}件
+                    {capillaryFingerLabels[obs.finger] ?? obs.finger}
                   </span>
+                  {(obs.densityPerMm != null || patternSummary(obs.patternCodes)) && (
+                    <span className="text-base leading-relaxed text-[var(--text)]">
+                      {obs.densityPerMm != null && (
+                        <>
+                          密度{" "}
+                          <span className="text-[22px] font-bold leading-none text-[var(--heading)]">
+                            {obs.densityPerMm}
+                          </span>{" "}
+                          本/mm
+                        </>
+                      )}
+                      {obs.densityPerMm != null && patternSummary(obs.patternCodes) && "／"}
+                      {patternSummary(obs.patternCodes) && (
+                        <>形：{patternSummary(obs.patternCodes)}</>
+                      )}
+                    </span>
+                  )}
                   <span className="flex flex-wrap gap-2">
                     {isDummySubject(obs.subjectName) && (
                       <span className="rounded-full border border-[var(--accent)] bg-[var(--surface)] px-3 py-0.5 text-sm font-bold text-[var(--accent-strong)]">
@@ -415,8 +615,12 @@ function ListScreen({
                       </span>
                     )}
                     {obs.flowSpeedMmPerSec != null && (
-                      <span className="rounded-full bg-[var(--paper)] px-3 py-0.5 text-sm font-bold text-[var(--text)]">
-                        血流速度 {obs.flowSpeedMmPerSec.toFixed(2)} mm/秒（参考値）
+                      <span className="rounded-full bg-[var(--paper)] px-3 py-0.5 text-base font-bold text-[var(--text)]">
+                        血流速度{" "}
+                        <span className="text-lg text-[var(--heading)]">
+                          {obs.flowSpeedMmPerSec.toFixed(2)}
+                        </span>{" "}
+                        mm/秒（参考値）
                       </span>
                     )}
                   </span>
@@ -522,14 +726,20 @@ function NewScreen({ go, trialMode }: { go: (v: View) => void; trialMode: boolea
         </button>
       </div>
 
+      <StepNav />
+
       {/* lg以上：左＝操作・所見フォーム（カラム内スクロール）、右＝画像画面（全面）。
           lg未満：ラッパーを display:contents にして従来どおりの縦積み
           （見出し→メディア上部固定→操作→フォーム）に戻す。 */}
-      <div className="flex flex-col gap-8 lg:grid lg:h-[calc(100dvh-12.75rem)] lg:min-h-[400px] lg:grid-cols-[minmax(400px,470px)_minmax(0,1fr)] lg:gap-6">
+      <div className="flex flex-col gap-8 lg:grid lg:h-[calc(100dvh-21.75rem)] lg:min-h-[400px] lg:grid-cols-[minmax(400px,470px)_minmax(0,1fr)] lg:gap-6">
         <div className="contents lg:order-1 lg:flex lg:min-h-0 lg:flex-col lg:gap-8 lg:overflow-y-auto lg:pr-1">
-          <CaptureIntro support={cap.support} className="order-1" />
+          <CaptureIntro
+            support={cap.support}
+            id="obs-step-capture"
+            className="order-1 scroll-mt-32 lg:scroll-mt-4"
+          />
           <CaptureControls cap={cap} className="order-3" />
-          <div className="order-4">
+          <div id="obs-step-findings" className="order-4 scroll-mt-32 lg:scroll-mt-4">
             <FindingsForm
               value={form}
               onChange={setForm}
@@ -542,14 +752,16 @@ function NewScreen({ go, trialMode }: { go: (v: View) => void; trialMode: boolea
               {error}
             </p>
           )}
-          <button
-            type="button"
-            disabled={create.isPending}
-            onClick={handleSave}
-            className="order-6 min-h-16 shrink-0 rounded-[var(--radius)] bg-[var(--accent)] px-6 text-xl font-bold text-white disabled:opacity-40"
-          >
-            {create.isPending ? "保存しています…" : "保存してレポートを見る"}
-          </button>
+          <div className="sticky bottom-0 z-20 order-6 -mx-4 border-t border-[var(--border)] bg-[var(--bg)]/95 px-4 py-3 shadow-[0_-8px_16px_-12px_rgba(13,59,76,0.35)] backdrop-blur max-lg:shrink-0 sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0 lg:pb-1">
+            <button
+              type="button"
+              disabled={create.isPending}
+              onClick={handleSave}
+              className="min-h-16 w-full rounded-[var(--radius)] bg-[var(--accent)] px-6 text-xl font-bold text-white disabled:opacity-40"
+            >
+              {create.isPending ? "保存しています…" : "保存してレポートを作成"}
+            </button>
+          </div>
         </div>
         <div className="contents lg:order-2 lg:block lg:min-h-0">
           <CaptureMediaDisplay cap={cap} className="order-2 lg:h-full" />
@@ -626,8 +838,7 @@ function ReportScreen({
       setActionError(e instanceof Error ? e.message : "削除に失敗しました"),
   });
 
-  if (detail.isPending)
-    return <p className="text-lg text-[var(--dim)]">読み込んでいます…</p>;
+  if (detail.isPending) return <LoadingState />;
   if (detail.error || !obs)
     return (
       <div className="flex flex-col gap-4">
@@ -679,26 +890,38 @@ function ReportScreen({
             血流速度を測る（試作）
           </button>
         )}
-        <button
-          type="button"
-          onClick={() => window.print()}
-          className="min-h-14 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-5 text-lg text-[var(--text)]"
-        >
-          印刷する（A4）
-        </button>
         {obs.status !== "finalized" && (
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="min-h-14 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-5 text-lg text-[var(--text)]"
+          >
+            印刷する（A4）
+          </button>
+        )}
+        {/* 主要アクションは1つだけを右端に大きく置く。
+            未確定なら「確定」、確定済みなら「印刷」が主要になる。 */}
+        {obs.status !== "finalized" ? (
           <button
             type="button"
             disabled={finalize.isPending}
             onClick={() => finalize.mutate()}
-            className="min-h-14 rounded-[var(--radius)] bg-[var(--accent)] px-5 text-lg font-bold text-white disabled:opacity-40"
+            className="ml-auto min-h-16 rounded-[var(--radius)] bg-[var(--accent)] px-7 text-xl font-bold text-white disabled:opacity-40"
           >
             {finalize.isPending ? "確定しています…" : "レポートを確定する"}
           </button>
-        )}
-        {obs.status === "finalized" && (
-          <span className="rounded-full bg-[var(--accent)] px-4 py-2 text-base font-bold text-white">
-            確定済み
+        ) : (
+          <span className="ml-auto flex flex-wrap items-center gap-3">
+            <span className="rounded-full bg-[var(--accent)] px-4 py-2 text-base font-bold text-white">
+              確定済み
+            </span>
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="min-h-16 rounded-[var(--radius)] bg-[var(--accent)] px-7 text-xl font-bold text-white"
+            >
+              印刷する（A4）
+            </button>
           </span>
         )}
       </div>
@@ -901,8 +1124,7 @@ function EditScreen({
       setError(e instanceof Error ? e.message : "動画の削除に失敗しました"),
   });
 
-  if (detail.isPending || !form)
-    return <p className="text-lg text-[var(--dim)]">読み込んでいます…</p>;
+  if (detail.isPending || !form) return <LoadingState />;
   if (detail.error || !obs)
     return (
       <p role="alert" className="text-lg text-[var(--alert)]">
@@ -932,9 +1154,11 @@ function EditScreen({
         </button>
       </div>
 
+      <StepNav />
+
       {/* lg以上：左＝操作・所見フォーム（カラム内スクロール）、右＝画像・動画の表示面。
           lg未満：ラッパーを display:contents にして従来どおりの縦積みに戻す。 */}
-      <div className="flex flex-col gap-8 lg:grid lg:h-[calc(100dvh-12.75rem)] lg:min-h-[400px] lg:grid-cols-[minmax(400px,470px)_minmax(0,1fr)] lg:gap-6">
+      <div className="flex flex-col gap-8 lg:grid lg:h-[calc(100dvh-21.75rem)] lg:min-h-[400px] lg:grid-cols-[minmax(400px,470px)_minmax(0,1fr)] lg:gap-6">
         <div className="contents lg:order-1 lg:flex lg:min-h-0 lg:flex-col lg:gap-8 lg:overflow-y-auto lg:pr-1">
           {obs.images.length < 5 && (
             <div className="order-2 flex flex-col gap-3">
@@ -1010,7 +1234,7 @@ function EditScreen({
             />
           </div>
 
-          <div className="order-5">
+          <div id="obs-step-findings" className="order-5 scroll-mt-32 lg:scroll-mt-4">
             <FindingsForm
               value={form}
               onChange={setForm}
@@ -1024,18 +1248,24 @@ function EditScreen({
               {error}
             </p>
           )}
-          <button
-            type="button"
-            disabled={update.isPending}
-            onClick={handleSave}
-            className="order-7 min-h-16 shrink-0 rounded-[var(--radius)] bg-[var(--accent)] px-6 text-xl font-bold text-white disabled:opacity-40"
-          >
-            {update.isPending ? "保存しています…" : "変更を保存する"}
-          </button>
+          <div className="sticky bottom-0 z-20 order-7 -mx-4 border-t border-[var(--border)] bg-[var(--bg)]/95 px-4 py-3 shadow-[0_-8px_16px_-12px_rgba(13,59,76,0.35)] backdrop-blur sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0 lg:pb-1">
+            <button
+              type="button"
+              disabled={update.isPending}
+              onClick={handleSave}
+              className="min-h-16 w-full rounded-[var(--radius)] bg-[var(--accent)] px-6 text-xl font-bold text-white disabled:opacity-40"
+            >
+              {update.isPending ? "保存しています…" : "変更を保存する"}
+            </button>
+          </div>
         </div>
 
         <div className="contents lg:order-2 lg:flex lg:min-h-0 lg:flex-col lg:gap-8 lg:overflow-y-auto">
-          <section aria-label="登録済みの画像" className="order-1 flex flex-col gap-3">
+          <section
+            id="obs-step-capture"
+            aria-label="登録済みの画像"
+            className="order-1 flex scroll-mt-32 flex-col gap-3 lg:scroll-mt-4"
+          >
             <h2 className="text-xl font-bold text-[var(--text)]">登録済みの画像（{obs.images.length}枚）</h2>
             {obs.images.length > 0 ? (
               <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3">
@@ -1107,8 +1337,7 @@ function MeasureScreen({ id, go }: { id: string; go: (v: View) => void }) {
   });
   const obs = detail.data?.observation ?? null;
 
-  if (detail.isPending)
-    return <p className="text-lg text-[var(--dim)]">読み込んでいます…</p>;
+  if (detail.isPending) return <LoadingState />;
   if (detail.error || !obs || !obs.video)
     return (
       <div className="flex flex-col gap-4">
@@ -1168,11 +1397,18 @@ export function CapillaryApp() {
 
   return (
     <div className="min-h-screen bg-[var(--bg)]">
+      <AppNav
+        view={view}
+        go={go}
+        trialMode={trialMode}
+        onTrialModeChange={changeTrialMode}
+        wide={wideView}
+      />
       <main
         className={`mx-auto w-full px-4 pb-10 pt-4 sm:px-6 ${wideView ? "max-w-[1680px]" : "max-w-6xl"}`}
       >
         {view.kind === "list" && (
-          <ListScreen go={go} trialMode={trialMode} onTrialModeChange={changeTrialMode} />
+          <ListScreen go={go} trialMode={trialMode} />
         )}
         {view.kind === "new" && <NewScreen go={go} trialMode={trialMode} />}
         {view.kind === "report" && (

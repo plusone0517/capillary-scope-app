@@ -16,6 +16,7 @@ capillaryPatternByCode,
 type ClinicalFlagKey,
 } from "./patterns";
 import { PatternDiagram } from "./PatternDiagram";
+import { LogoMark } from "./Logo";
 import {
 colorLabel,
 conditionWarnings,
@@ -195,11 +196,21 @@ export function ReportBody({
   return (
     <div id="report-print" className="bg-[var(--surface)]">
       <div className="bg-[var(--paper)] px-5 py-4 sm:px-7">
-        <h1 className="r-title">毛細血管観察レポート</h1>
-        <p className="r-meta mt-1">
-          観察日：{formatDateTime(obs.observedAt)}　対象：{obs.subjectName}
-          {obs.subjectId ? `（ID：${obs.subjectId}）` : ""}
-        </p>
+        <div className="flex items-start gap-3">
+          <LogoMark size={46} className="mt-1 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <h1 className="r-title">毛細血管観察レポート</h1>
+            <p className="r-meta mt-1">
+              観察日：{formatDateTime(obs.observedAt)}　対象：{obs.subjectName}
+              {obs.subjectId ? `（ID：${obs.subjectId}）` : ""}
+            </p>
+          </div>
+          <p className="r-src shrink-0 pt-2 text-right">
+            毛細血管 観察・記録システム
+            <br />
+            メディプロ医薬
+          </p>
+        </div>
         {isDummySubject(obs.subjectName) && (
           <p className="r-src mt-1">
             ※
@@ -273,9 +284,17 @@ export function ReportBody({
         <h2 className="r-sec">撮影と所見</h2>
         <dl className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
           {findings.map((f) => (
-            <div key={f.label} className="flex gap-2">
+            <div key={f.label} className="flex items-baseline gap-2">
               <dt className="r-small shrink-0 font-bold">{f.label}：</dt>
-              <dd className="r-small">{f.value}</dd>
+              <dd
+                className={
+                  f.label === "密度" || f.label.startsWith("血流速度")
+                    ? "r-num"
+                    : "r-small"
+                }
+              >
+                {f.value}
+              </dd>
             </div>
           ))}
         </dl>
@@ -341,9 +360,17 @@ export function ReportBody({
             )}
             <dl className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2">
               {compareRows.map((row) => (
-                <div key={row.label} className="flex gap-2">
+                <div key={row.label} className="flex items-baseline gap-2">
                   <dt className="r-small shrink-0 font-bold">{row.label}：</dt>
-                  <dd className="r-small">{row.value}</dd>
+                  <dd
+                    className={
+                      row.label === "密度" || row.label.startsWith("血流速度")
+                        ? "r-num"
+                        : "r-small"
+                    }
+                  >
+                    {row.value}
+                  </dd>
                 </div>
               ))}
             </dl>

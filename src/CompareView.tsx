@@ -7,6 +7,7 @@ import { useRef, type RefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
 import { formatDateTime, isDummySubject } from "./ReportView";
+import { LoadingState } from "./States";
 import {
   colorLabel,
   conditionWarnings,
@@ -147,8 +148,7 @@ export function CompareScreen({
   const o1 = qBefore.data?.observation ?? null;
   const o2 = qAfter.data?.observation ?? null;
 
-  if (qBefore.isPending || qAfter.isPending)
-    return <p className="text-lg text-[var(--dim)]">読み込んでいます…</p>;
+  if (qBefore.isPending || qAfter.isPending) return <LoadingState />;
   if (qBefore.error || qAfter.error || !o1 || !o2)
     return (
       <div className="flex flex-col gap-4">

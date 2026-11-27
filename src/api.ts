@@ -147,6 +147,10 @@ export type ObservationListItem = {
   status: string;
   hasClinicalFlag: boolean;
   patternCount: number;
+  /** 一覧カードの要約表示用（保存済みの値をそのまま渡す読み取り専用の射影）。 */
+  densityPerMm: number | null;
+  /** 一覧カードの要約表示用（パターンコードの配列）。 */
+  patternCodes: string[];
   primaryImageUrl: string | null;
   hasVideo: boolean;
   flowSpeedMmPerSec: number | null;
@@ -721,6 +725,8 @@ export const api = {
             obs.clinicalFlags?.ramified,
         ),
         patternCount: (obs.patterns ?? []).length,
+        densityPerMm: obs.densityPerMm ?? null,
+        patternCodes: obs.patterns ?? [],
         primaryImageUrl,
         hasVideo: (obs.videos ?? []).length > 0,
         flowSpeedMmPerSec: flow.flowSpeedMmPerSec,

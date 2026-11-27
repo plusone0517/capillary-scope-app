@@ -28,7 +28,8 @@ button {
 
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
+  opacity: 0.5;
+  filter: saturate(0.35);
 }
 
 .primary-button {
@@ -38,10 +39,61 @@ button:disabled {
   font-weight: 600;
 }
 
+.primary-button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
 .secondary-button {
   background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border-strong);
+}
+
+.secondary-button:hover:not(:disabled) {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+}
+
+/* ヘッダー（濃色の帯）の上にロゴを置くための白いチップ。
+   ロゴの2色（ネイビー／ティール）が帯の上でもそのまま見える。 */
+.logo-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border-radius: 10px;
+  padding: 5px;
+  flex-shrink: 0;
+}
+
+/* 読み込み中のスピナー（CSSアニメーションのみ） */
+.loading-spinner {
+  display: inline-block;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 4px solid var(--accent-bg);
+  border-top-color: var(--accent);
+  animation: loading-spin 0.9s linear infinite;
+  flex-shrink: 0;
+}
+
+.loading-spinner-sm {
+  width: 22px;
+  height: 22px;
+  border-width: 3px;
+}
+
+@keyframes loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-spinner {
+    animation-duration: 2.4s;
+  }
 }
 
 input {
@@ -90,6 +142,30 @@ input:focus {
   letter-spacing: 0.02em;
 }
 
+/* ログイン画面の製品表示：開発元を小さく添え、製品名を大きく見せる。 */
+.login-brand {
+  margin: 0 0 10px;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.login-card h1 {
+  font-size: 30px;
+  line-height: 1.35;
+  margin-bottom: 10px;
+}
+
+.login-card {
+  padding: 36px 32px;
+}
+
+.login-card .primary-button {
+  min-height: 56px;
+  font-size: 18px;
+}
+
 .login-card label {
   display: block;
   margin: 16px 0 4px;
@@ -127,7 +203,7 @@ input:focus {
 }
 
 .app-header h1 {
-  font-size: 20px;
+  font-size: 22px;
   margin: 0;
   color: #fff;
   letter-spacing: 0.03em;

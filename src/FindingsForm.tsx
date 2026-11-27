@@ -1,12 +1,14 @@
 // 所見入力フォーム（撮影の型どおりの項目）。
 // 新規作成と編集で共用する。値の保持は親コンポーネント側。
 
+import { useState } from "react";
 import {
 capillaryChangeOptions,
 capillaryClinicalFlagLabels,
 capillaryColorImpressions,
 capillaryFingers,
 capillaryFlowImpressions,
+capillaryPatternByCode,
 capillaryPatterns,
 type ClinicalFlagKey,
 } from "./patterns";
@@ -140,6 +142,21 @@ export function FindingsForm({
         ? value.patterns.filter((c) => c !== code)
         : [...value.patterns, code],
     });
+  };
+
+  // 説明パネルに表示するパターン。タイルやチップを押すたびに切り替わり、
+  // 未操作の間は選択済みの先頭を表示する。
+  const [focusedCode, setFocusedCode] = useState<string | null>(null);
+  const detailPattern =
+    (focusedCode ? capillaryPatternByCode[focusedCode] : undefined) ??
+    value.patterns
+      .map((code) => capillaryPatternByCode[code])
+      .find((p) => p != null) ??
+    null;
+
+  const handleTile = (code: string) => {
+    setFocusedCode(code);
+    togglePattern(code);
   };
 
   const hasAnyFlag = Object.values(value.flags).some(Boolean);
@@ -303,67 +320,138 @@ export function FindingsForm({
           4. 形のパターン（実写と見比べて、近いものを複数選択）
         </h2>
         <p className="text-base text-[var(--dim)]">
-          選択中：{value.patterns.length}件。パターンは断定ではなく「最も近い形」として記録します。
+          選択中：{value.patterns.length}件。パターンは断定ではなく「最も近い形」として記録します。タイルを押すと、下に説明が表示されます。
         </p>
-        <div className="grid gap-3 sm:grid-cols-2">
+
+        {value.patterns.length > 0 && (
+          <div className="flex flex-wrap gap-2" aria-label="選択中のパターン">
+            {value.patterns.map((code) => {
+              const p = capillaryPatternByCode[code];
+              if (!p) return null;
+              return (
+                <span
+                  key={code}
+                  className="flex items-center gap-1 rounded-full border border-[var(--accent)] bg-[var(--accent-bg)] py-0.5 pl-2 pr-0.5"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setFocusedCode(code)}
+                    className="min-h-11 rounded-full px-2 text-base font-bold text-[var(--accent-strong)]"
+                  >
+                    {p.name}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`${p.name}の選択を外す`}
+                    onClick={() => togglePattern(code)}
+                    className="flex h-11 w-11 items-center justify-center rounded-full text-xl leading-none text-[var(--accent-strong)]"
+                  >
+                    ×
+                  </button>
+                </span>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-2">
           {capillaryPatterns.map((pattern) => {
             const selected = value.patterns.includes(pattern.code);
+            const focused = detailPattern?.code === pattern.code;
             return (
               <button
                 key={pattern.code}
                 type="button"
                 aria-pressed={selected}
-                onClick={() => togglePattern(pattern.code)}
-                className={`flex min-h-14 flex-col gap-2 rounded-[var(--radius)] border-2 p-4 text-left ${
+                onClick={() => handleTile(pattern.code)}
+                className={`relative flex min-h-14 flex-col gap-2 rounded-[var(--radius)] border-2 p-3 text-left ${
                   selected
                     ? "border-[var(--accent)] bg-[var(--accent-bg)]"
-                    : "border-[var(--border)] bg-[var(--surface)]"
+                    : focused
+                      ? "border-[var(--border-strong)] bg-[var(--surface)]"
+                      : "border-[var(--border)] bg-[var(--surface)]"
                 }`}
               >
-                <PatternDiagram
-                  code={pattern.code}
-                  title={`${pattern.name}の模式図`}
-                  className={`h-28 w-full rounded border ${
-                    selected ? "border-[var(--accent)]" : "border-[var(--border)]"
-                  }`}
-                />
-                <span className="flex items-center gap-2 text-lg font-bold text-[var(--text)]">
+                {pattern.clinical && (
                   <span
                     aria-hidden
-                    className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border text-base ${
-                      selected
-                        ? "border-[var(--accent)] bg-[var(--accent)] text-white"
-                        : "border-[var(--border)] text-transparent"
-                    }`}
+                    title="臨床フラグ対応"
+                    className="absolute right-2 top-2 z-10 h-3.5 w-3.5 rounded-full border-2 border-white bg-[var(--alert)] shadow"
+                  />
+                )}
+                {selected && (
+                  <span
+                    aria-hidden
+                    className="absolute left-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-[var(--accent)] text-base font-bold text-white shadow"
                   >
                     ✓
                   </span>
+                )}
+                <PatternDiagram
+                  code={pattern.code}
+                  title={`${pattern.name}の模式図`}
+                  className={`h-24 w-full rounded border ${
+                    selected ? "border-[var(--accent)]" : "border-[var(--border)]"
+                  }`}
+                />
+                <span className="text-base font-bold leading-snug text-[var(--text)] sm:text-lg">
                   {pattern.name}
-                  {pattern.clinical && (
-                    <span className="rounded-full bg-[var(--alert-bg)] px-2 py-0.5 text-sm font-bold text-[var(--alert)]">
-                      臨床フラグ対応
-                    </span>
-                  )}
-                </span>
-                <span className="text-base leading-relaxed text-[var(--text)]">
-                  {pattern.feature}
-                </span>
-                <span className="text-base leading-relaxed text-[var(--accent-strong)]">
-                  原因：{pattern.why}
-                </span>
-                <span className="text-sm leading-relaxed text-[var(--dim)]">
-                  重なりやすい症状：{pattern.symptoms}
-                </span>
-                <span className="text-sm leading-relaxed text-[var(--dim)]">
-                  未病の見方：{pattern.mibyo}
                 </span>
               </button>
             );
           })}
         </div>
+
+        <div
+          aria-live="polite"
+          className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-card)]"
+        >
+          {detailPattern ? (
+            <div className="flex flex-col gap-2">
+              <p className="flex flex-wrap items-center gap-2 text-xl font-bold text-[var(--text)]">
+                {detailPattern.name}
+                {detailPattern.clinical && (
+                  <span className="rounded-full bg-[var(--alert-bg)] px-2 py-0.5 text-sm font-bold text-[var(--alert)]">
+                    臨床フラグ対応
+                  </span>
+                )}
+                {value.patterns.includes(detailPattern.code) && (
+                  <span className="rounded-full bg-[var(--accent)] px-2 py-0.5 text-sm font-bold text-white">
+                    選択中
+                  </span>
+                )}
+              </p>
+              <PatternDiagram
+                code={detailPattern.code}
+                title={`${detailPattern.name}の模式図`}
+                className="h-28 w-full rounded border border-[var(--border)]"
+              />
+              <p className="text-lg leading-relaxed text-[var(--text)]">
+                {detailPattern.feature}
+              </p>
+              <p className="text-lg leading-relaxed text-[var(--accent-strong)]">
+                原因：{detailPattern.why}
+              </p>
+              <p className="text-base leading-relaxed text-[var(--dim)]">
+                重なりやすい症状：{detailPattern.symptoms}
+              </p>
+              <p className="text-base leading-relaxed text-[var(--dim)]">
+                未病の見方：{detailPattern.mibyo}
+              </p>
+            </div>
+          ) : (
+            <p className="text-lg leading-relaxed text-[var(--dim)]">
+              タイルを押すと、ここに形の説明（特徴・原因・重なりやすい症状・未病の見方）が表示されます。
+            </p>
+          )}
+        </div>
       </section>
 
-      <section aria-label="まとめとアドバイス" className="flex flex-col gap-4">
+      <section
+        id="obs-step-confirm"
+        aria-label="まとめとアドバイス"
+        className="flex scroll-mt-32 flex-col gap-4 lg:scroll-mt-4"
+      >
         <h2 className="text-xl font-bold text-[var(--text)]">5. まとめとアドバイス</h2>
         {/* 本番のデータモデルでは、所見のまとめは保存せず、レポート表示時に
             所見から組み立てる（models.ts の Report の方針）。ここでは

@@ -295,12 +295,15 @@ export type CapturePanelApi = ReturnType<typeof useCapturePanel>;
 export function CaptureIntro({
   support,
   className = "",
+  id,
 }: {
   support: CapturePanelApi["support"];
   className?: string;
+  /** ステップ表示からのスクロール先にする場合のアンカーID。 */
+  id?: string;
 }) {
   return (
-    <div className={`flex flex-col gap-4 ${className}`}>
+    <div id={id} className={`flex flex-col gap-4 ${className}`}>
       <h2 className="text-xl font-bold text-[var(--text)]">1. 撮影・画像と動画の取り込み</h2>
 
       {support.kind === "iphone" && (
@@ -355,7 +358,7 @@ export function CaptureMediaDisplay({
 
   return (
     <div
-      className={`sticky top-0 z-30 -mx-4 flex flex-col gap-2 border-b border-[var(--border)] bg-[var(--bg)] px-4 py-2 shadow-[0_8px_16px_-12px_rgba(0,0,0,0.4)] sm:-mx-6 sm:px-6 lg:static lg:z-auto lg:mx-0 lg:min-h-0 lg:gap-3 lg:border-b-0 lg:bg-transparent lg:px-0 lg:py-0 lg:shadow-none ${className}`}
+      className={`sticky top-[108px] z-30 -mx-4 flex flex-col gap-2 border-b border-[var(--border)] bg-[var(--bg)] px-4 py-2 shadow-[0_8px_16px_-12px_rgba(0,0,0,0.4)] sm:-mx-6 sm:px-6 lg:static lg:z-auto lg:mx-0 lg:min-h-0 lg:gap-3 lg:border-b-0 lg:bg-transparent lg:px-0 lg:py-0 lg:shadow-none ${className}`}
     >
       {support.kind === "ok" && (
         <div className="relative overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-[var(--video-bg)] lg:min-h-0 lg:flex-1">

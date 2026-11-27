@@ -2,6 +2,7 @@
 import { useState, type FormEvent } from "react";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "../firebase";
+import { LogoMark } from "../Logo";
 
 export function LoginScreen() {
   const [email, setEmail] = useState("");
@@ -26,7 +27,15 @@ export function LoginScreen() {
   return (
     <main className="login-screen">
       <form className="login-card" onSubmit={handleSubmit}>
-        <h1>毛細血管 分析アプリ</h1>
+        <div className="flex justify-center pb-1 pt-1">
+          <LogoMark size={84} />
+        </div>
+        <p className="login-brand text-center">メディプロ医薬 開発</p>
+        <h1>
+          毛細血管
+          <br />
+          観察・記録システム
+        </h1>
         <p className="login-note">院内スタッフ専用です。ログインして使ってください。</p>
         <label>
           メールアドレス

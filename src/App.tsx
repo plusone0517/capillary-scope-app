@@ -2,6 +2,7 @@
 import { AuthProvider, useAuth, logout } from "./auth/AuthGate";
 import { LoginScreen } from "./auth/LoginScreen";
 import { HomePage } from "./pages/HomePage";
+import { LoadingState } from "./States";
 
 function Gate() {
   const authState = useAuth();
@@ -10,7 +11,7 @@ function Gate() {
     case "loading":
       return (
         <main className="center-screen">
-          <p>読み込み中…</p>
+          <LoadingState label="読み込み中…" />
         </main>
       );
     case "signedOut":
