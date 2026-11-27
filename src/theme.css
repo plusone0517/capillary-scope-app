@@ -125,6 +125,21 @@
   }
 }
 
+/* パターン説明パネル（アコーディオン）の展開アニメーション。短く控えめに。 */
+@keyframes pattern-detail-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.pattern-detail-panel {
+  animation: pattern-detail-in 180ms ease-out;
+}
+
 /* ===== レポート（画面表示と印刷で共用。正本SVGのクラス構成に対応） ===== */
 .r-title { font-size: 30px; font-weight: 700; color: var(--heading); line-height: 1.3; letter-spacing: 0.02em; }
 .r-meta { font-size: 16px; color: var(--dim); line-height: 1.6; }

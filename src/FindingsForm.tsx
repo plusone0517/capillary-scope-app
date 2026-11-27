@@ -1,7 +1,7 @@
 // 所見入力フォーム（撮影の型どおりの項目）。
 // 新規作成と編集で共用する。値の保持は親コンポーネント側。
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
 capillaryChangeOptions,
 capillaryClinicalFlagLabels,
@@ -79,6 +79,26 @@ export function emptyFindings(observedAtLocal: string): FindingsState {
   };
 }
 
+// パターン選択グリッドの現在の列数。
+// グリッドのクラス（grid-cols-2 / sm:grid-cols-3 / lg:grid-cols-2）と
+// 同じブレークポイントで判定し、説明パネルを差し込む行末を求めるために使う。
+function usePatternGridColumns(): number {
+  const read = (): number => {
+    if (typeof window === "undefined") return 2;
+    if (window.matchMedia("(min-width: 1024px)").matches) return 2;
+    if (window.matchMedia("(min-width: 640px)").matches) return 3;
+    return 2;
+  };
+  const [columns, setColumns] = useState<number>(read);
+  useEffect(() => {
+    const update = () => setColumns(read());
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+  return columns;
+}
+
 const inputClass =
   "min-h-14 w-full rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-3 text-lg text-[var(--text)]";
 const labelClass = "flex flex-col gap-1 text-base font-medium text-[var(--text)]";
@@ -144,20 +164,88 @@ export function FindingsForm({
     });
   };
 
-  // 説明パネルに表示するパターン。タイルやチップを押すたびに切り替わり、
-  // 未操作の間は選択済みの先頭を表示する。
-  const [focusedCode, setFocusedCode] = useState<string | null>(null);
-  const detailPattern =
-    (focusedCode ? capillaryPatternByCode[focusedCode] : undefined) ??
-    value.patterns
-      .map((code) => capillaryPatternByCode[code])
-      .find((p) => p != null) ??
-    null;
+  // 説明パネルを開いているパターン。タイルやチップを押すと、そのタイルの
+  // 行のすぐ下にパネルが開く。×で閉じても選択状態は変えない。
+  const [openCode, setOpenCode] = useState<string | null>(null);
+  const openPattern = openCode ? capillaryPatternByCode[openCode] : undefined;
+  const columns = usePatternGridColumns();
+  const openIndex = openPattern
+    ? capillaryPatterns.findIndex((p) => p.code === openPattern.code)
+    : -1;
+  // パネルを差し込む位置＝開いたタイルが属する行の末尾のタイルの直後。
+  const panelAfterIndex =
+    openIndex >= 0
+      ? Math.min(
+          Math.floor(openIndex / columns) * columns + columns - 1,
+          capillaryPatterns.length - 1,
+        )
+      : -1;
 
   const handleTile = (code: string) => {
-    setFocusedCode(code);
+    setOpenCode(code);
     togglePattern(code);
   };
+
+  // チップを押したときは、そのタイルの位置までスクロールしてから説明を開く。
+  const openFromChip = (code: string) => {
+    setOpenCode(code);
+    requestAnimationFrame(() => {
+      document
+        .getElementById(`pattern-tile-${code}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  };
+
+  // 説明パネル本体。グリッドの中で、開いたタイルの行末の直後に
+  // 全幅（col-span-full）で差し込む。×で閉じても選択は変わらない。
+  const detailPanel = openPattern ? (
+    <div
+      key={`pattern-detail-${openPattern.code}`}
+      aria-live="polite"
+      className="pattern-detail-panel relative col-span-full rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-card)]"
+    >
+      <button
+        type="button"
+        aria-label="説明を閉じる"
+        onClick={() => setOpenCode(null)}
+        className="absolute right-2 top-2 flex h-11 w-11 items-center justify-center rounded-full text-2xl leading-none text-[var(--dim)]"
+      >
+        ×
+      </button>
+      <div className="flex flex-col gap-2">
+        <p className="flex flex-wrap items-center gap-2 pr-12 text-xl font-bold text-[var(--text)]">
+          {openPattern.name}
+          {openPattern.clinical && (
+            <span className="rounded-full bg-[var(--alert-bg)] px-2 py-0.5 text-sm font-bold text-[var(--alert)]">
+              臨床フラグ対応
+            </span>
+          )}
+          {value.patterns.includes(openPattern.code) && (
+            <span className="rounded-full bg-[var(--accent)] px-2 py-0.5 text-sm font-bold text-white">
+              選択中
+            </span>
+          )}
+        </p>
+        <PatternDiagram
+          code={openPattern.code}
+          title={`${openPattern.name}の模式図`}
+          className="h-28 w-full rounded border border-[var(--border)]"
+        />
+        <p className="text-lg leading-relaxed text-[var(--text)]">
+          {openPattern.feature}
+        </p>
+        <p className="text-lg leading-relaxed text-[var(--accent-strong)]">
+          原因：{openPattern.why}
+        </p>
+        <p className="text-base leading-relaxed text-[var(--dim)]">
+          重なりやすい症状：{openPattern.symptoms}
+        </p>
+        <p className="text-base leading-relaxed text-[var(--dim)]">
+          未病の見方：{openPattern.mibyo}
+        </p>
+      </div>
+    </div>
+  ) : null;
 
   const hasAnyFlag = Object.values(value.flags).some(Boolean);
 
@@ -320,7 +408,7 @@ export function FindingsForm({
           4. 形のパターン（実写と見比べて、近いものを複数選択）
         </h2>
         <p className="text-base text-[var(--dim)]">
-          選択中：{value.patterns.length}件。パターンは断定ではなく「最も近い形」として記録します。タイルを押すと、下に説明が表示されます。
+          選択中：{value.patterns.length}件。パターンは断定ではなく「最も近い形」として記録します。タイルを押すと、その場で説明が開きます。
         </p>
 
         {value.patterns.length > 0 && (
@@ -335,7 +423,7 @@ export function FindingsForm({
                 >
                   <button
                     type="button"
-                    onClick={() => setFocusedCode(code)}
+                    onClick={() => openFromChip(code)}
                     className="min-h-11 rounded-full px-2 text-base font-bold text-[var(--accent-strong)]"
                   >
                     {p.name}
@@ -355,12 +443,13 @@ export function FindingsForm({
         )}
 
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-2">
-          {capillaryPatterns.map((pattern) => {
+          {capillaryPatterns.flatMap((pattern, index) => {
             const selected = value.patterns.includes(pattern.code);
-            const focused = detailPattern?.code === pattern.code;
-            return (
+            const focused = openPattern?.code === pattern.code;
+            const tile = (
               <button
                 key={pattern.code}
+                id={`pattern-tile-${pattern.code}`}
                 type="button"
                 aria-pressed={selected}
                 onClick={() => handleTile(pattern.code)}
@@ -399,51 +488,11 @@ export function FindingsForm({
                 </span>
               </button>
             );
+            // 開いたタイルの行の末尾の直後に、説明パネルを差し込む。
+            return detailPanel && index === panelAfterIndex
+              ? [tile, detailPanel]
+              : [tile];
           })}
-        </div>
-
-        <div
-          aria-live="polite"
-          className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-card)]"
-        >
-          {detailPattern ? (
-            <div className="flex flex-col gap-2">
-              <p className="flex flex-wrap items-center gap-2 text-xl font-bold text-[var(--text)]">
-                {detailPattern.name}
-                {detailPattern.clinical && (
-                  <span className="rounded-full bg-[var(--alert-bg)] px-2 py-0.5 text-sm font-bold text-[var(--alert)]">
-                    臨床フラグ対応
-                  </span>
-                )}
-                {value.patterns.includes(detailPattern.code) && (
-                  <span className="rounded-full bg-[var(--accent)] px-2 py-0.5 text-sm font-bold text-white">
-                    選択中
-                  </span>
-                )}
-              </p>
-              <PatternDiagram
-                code={detailPattern.code}
-                title={`${detailPattern.name}の模式図`}
-                className="h-28 w-full rounded border border-[var(--border)]"
-              />
-              <p className="text-lg leading-relaxed text-[var(--text)]">
-                {detailPattern.feature}
-              </p>
-              <p className="text-lg leading-relaxed text-[var(--accent-strong)]">
-                原因：{detailPattern.why}
-              </p>
-              <p className="text-base leading-relaxed text-[var(--dim)]">
-                重なりやすい症状：{detailPattern.symptoms}
-              </p>
-              <p className="text-base leading-relaxed text-[var(--dim)]">
-                未病の見方：{detailPattern.mibyo}
-              </p>
-            </div>
-          ) : (
-            <p className="text-lg leading-relaxed text-[var(--dim)]">
-              タイルを押すと、ここに形の説明（特徴・原因・重なりやすい症状・未病の見方）が表示されます。
-            </p>
-          )}
         </div>
       </section>
 
