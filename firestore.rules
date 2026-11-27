@@ -1,0 +1,77 @@
+rules_version = '2';
+
+// 毛細血管分析アプリ（院内用）Firestore セキュリティルール
+//
+// 方針:
+// - 患者データ（patients / observations / reports）は、ログイン済みかつ
+//   staff コレクションに有効（active: true）な登録があるスタッフだけが読み書きできる。
+// - 受け取りクレーム（claims）は Cloud Functions（Admin SDK）だけが書き込む。
+//   クライアントからは読み取りのみ（スタッフが発行状況を確認するため）。
+// - 会員（ルーツマイル側）はこのプロジェクトの Firestore を直接読まない。
+//   取り込みは Functions 経由でのみ行う（設計書 capillary-analysis-app-sharing-design 参照）。
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function staffDoc() {
+      return get(/databases/$(database)/documents/staff/$(request.auth.uid)).data;
+    }
+
+    function isActiveStaff() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/staff/$(request.auth.uid))
+        && staffDoc().active == true;
+    }
+
+    function isAdmin() {
+      return isActiveStaff() && staffDoc().role == 'admin';
+    }
+
+    // スタッフ登録。自分のドキュメントはログイン直後の確認用に読める。
+    // 作成・変更・削除は管理者のみ（Functions / コンソール経由の登録を想定）。
+    match /staff/{staffId} {
+      allow read: if isSignedIn() && (request.auth.uid == staffId || isAdmin());
+      allow create, update, delete: if isAdmin();
+    }
+
+    // 対象者
+    match /patients/{patientId} {
+      allow read, create, update: if isActiveStaff();
+      allow delete: if isAdmin();
+    }
+
+    // 観察記録
+    match /observations/{observationId} {
+      allow read, create, update: if isActiveStaff();
+      allow delete: if isAdmin();
+    }
+
+    // レポート（観察から確定したもの）
+    match /reports/{reportId} {
+      allow read, create, update: if isActiveStaff();
+      allow delete: if isAdmin();
+    }
+
+    // 受け取りクレーム（QR用トークンのハッシュ・期限・使用済み管理）
+    // 書き込みは Functions のみ。クライアントの直接書き込みは全面禁止。
+    match /claims/{claimId} {
+      allow read: if isActiveStaff();
+      allow create, update, delete: if false;
+    }
+
+    // 監査ログ。スタッフは自分の操作の追記のみ可。改変・削除は不可。
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isActiveStaff() && request.resource.data.actorUid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // 上記以外はすべて拒否
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

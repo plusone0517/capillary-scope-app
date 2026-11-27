@@ -1,0 +1,30 @@
+rules_version = '2';
+
+// 毛細血管分析アプリ（院内用）Storage セキュリティルール
+//
+// パス設計:
+//   capillary/{patientId}/{observationId}/images/{fileName}  … 静止画（1回の観察で3〜5枚）
+//   capillary/{patientId}/{observationId}/videos/{fileName}  … 動画（10〜20秒）
+//
+// 方針:
+// - 公開URLは発行しない。読み書きは有効なスタッフ登録があるログイン中スタッフのみ。
+// - 画像・動画の表示はアプリ内の認証つき取得でのみ行う。
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isActiveStaff() {
+      return request.auth != null
+        && firestore.exists(/databases/(default)/documents/staff/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/staff/$(request.auth.uid)).data.active == true;
+    }
+
+    match /capillary/{patientId}/{observationId}/{kind}/{fileName} {
+      // kind は images / videos のみ許可
+      allow read, write: if isActiveStaff() && (kind == 'images' || kind == 'videos');
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

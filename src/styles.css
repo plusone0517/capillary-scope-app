@@ -1,0 +1,180 @@
+/* 毛細血管分析アプリ（院内用）基本スタイル。
+   院内スタッフ用だが、ボタン等の操作部は大きめ（高さ48px以上）を基本にする。 */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Noto Sans JP",
+    "Yu Gothic", sans-serif;
+  color: #21312b;
+  background: #f4f6f3;
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border-radius: 8px;
+  min-height: 48px;
+  padding: 10px 20px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.primary-button {
+  background: #2e6b4f;
+  color: #fff;
+  border: 1px solid #2e6b4f;
+}
+
+.secondary-button {
+  background: #fff;
+  color: #21312b;
+  border: 1px solid #9db3a8;
+}
+
+input {
+  font: inherit;
+  padding: 10px 12px;
+  border: 1px solid #b9c6bf;
+  border-radius: 8px;
+  width: 100%;
+  min-height: 48px;
+}
+
+/* ログイン画面 */
+.login-screen,
+.center-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.login-card,
+.notice-card {
+  background: #fff;
+  border: 1px solid #d8e0da;
+  border-radius: 12px;
+  padding: 32px;
+  max-width: 440px;
+  width: 100%;
+}
+
+.login-card h1,
+.notice-card h1 {
+  font-size: 22px;
+  margin: 0 0 8px;
+}
+
+.login-card label {
+  display: block;
+  margin: 16px 0 4px;
+  font-weight: 600;
+}
+
+.login-card .primary-button {
+  width: 100%;
+  margin-top: 24px;
+}
+
+.login-note {
+  color: #52645b;
+  margin: 0;
+}
+
+.login-error {
+  color: #a4271f;
+  background: #fbeae8;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+/* 本体 */
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 24px;
+  background: #fff;
+  border-bottom: 1px solid #d8e0da;
+  flex-wrap: wrap;
+}
+
+.app-header h1 {
+  font-size: 20px;
+  margin: 0;
+}
+
+.header-user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.app-main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px;
+  display: grid;
+  gap: 20px;
+}
+
+.panel {
+  background: #fff;
+  border: 1px solid #d8e0da;
+  border-radius: 12px;
+  padding: 24px;
+}
+
+.panel h2 {
+  font-size: 18px;
+  margin: 0 0 8px;
+}
+
+.action-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.pattern-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.pattern-list li {
+  border: 1px solid #e2e8e3;
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
+.pattern-feature {
+  display: block;
+  color: #52645b;
+  font-size: 14px;
+}
+
+.clinical-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #fbeae8;
+  color: #a4271f;
+  font-size: 12px;
+  font-weight: 600;
+}
