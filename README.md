@@ -14,10 +14,15 @@
 撮影・所見入力・レポート・ビフォアアフター・試験モードの画面は、
 試用版（Space）で固めた仕様をこの土台へ順次移植していきます。
 
+## デプロイ
+
+main ブランチへの push で GitHub Actions が自動デプロイします（Hosting / Firestore ルール / Storage ルール）。
+公開 URL: https://medipro-capillary-scope.web.app
+
 ## アーキテクチャ概要
 
 新規の独立した Firebase プロジェクトとして構築します
-（`.firebaserc` のプロジェクトID `medipro-capillary-scope` は仮の名前です。
+（`.firebaserc` のプロジェクトIDは `medipro-capillary-scope`。
 実際のプロジェクトを作成したら置き換えてください）。
 
 | 構成要素 | 役割 |
