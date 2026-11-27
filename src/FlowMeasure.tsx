@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
+import { LoadingState } from "./States";
 
 type Point = { x: number; y: number };
 
@@ -537,7 +538,7 @@ export function FlowMeasure({
           手順1：測りたい毛細血管に沿って、始点と終点の2点をタップ
         </h2>
         {!frameReady && !error && (
-          <p className="text-lg text-[var(--dim)]">動画を読み込んでいます…</p>
+          <LoadingState compact label="動画を読み込んでいます…" />
         )}
         <canvas
           ref={frameCanvasRef}

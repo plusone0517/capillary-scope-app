@@ -89,6 +89,40 @@
   h1, h2 {
     letter-spacing: 0.02em;
   }
+  /* 操作の手ざわり：色の変化を短いトランジションで滑らかにし、
+     キーボード操作時はフォーカスリングをはっきり出す。 */
+  button, [role="button"], a, summary {
+    transition:
+      background-color 160ms ease,
+      border-color 160ms ease,
+      color 160ms ease,
+      box-shadow 160ms ease,
+      filter 160ms ease;
+  }
+  button:not(:disabled):not(:has(img)):hover,
+  [role="button"]:not(:has(img)):hover {
+    filter: brightness(1.06);
+  }
+  button:not(:disabled):active,
+  [role="button"]:active {
+    filter: brightness(0.97);
+  }
+  :focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* エラー表示の統一：赤の帯（淡い地＋左の太線）＋太字。
+     個別のユーティリティ（余白や枠など）はこの上に重なる。 */
+  [role="alert"] {
+    background: var(--alert-bg);
+    border-left: 4px solid var(--alert);
+    border-radius: 8px;
+    padding: 0.6em 0.9em;
+    font-weight: 600;
+  }
 }
 
 /* ===== レポート（画面表示と印刷で共用。正本SVGのクラス構成に対応） ===== */
@@ -98,6 +132,8 @@
 .r-body { font-size: 18px; color: var(--text); line-height: 1.75; }
 .r-small { font-size: 16px; color: var(--text); line-height: 1.7; }
 .r-why { font-size: 16px; color: var(--accent); line-height: 1.7; }
+/* 密度・血流速度などの主要数値を一段大きく太く見せる。 */
+.r-num { font-size: 20px; font-weight: 700; color: var(--heading); line-height: 1.6; }
 .r-src { font-size: 13px; color: var(--dim); line-height: 1.6; }
 
 /* ===== 印刷：レポートだけをA4 1枚に収める ===== */
@@ -122,6 +158,7 @@
   #report-print .r-body { font-size: 11pt; line-height: 1.6; color: #1c2b33 !important; }
   #report-print .r-small { font-size: 10pt; line-height: 1.55; color: #1c2b33 !important; }
   #report-print .r-why { font-size: 10pt; line-height: 1.55; color: #12808a !important; }
+  #report-print .r-num { font-size: 12pt; color: #0d3b4c !important; }
   #report-print .r-src { font-size: 8.5pt; color: #8ca2ae !important; }
   #report-print img { max-height: 62mm; object-fit: cover; }
   .no-print { display: none !important; }

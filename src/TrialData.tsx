@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type TrialExportRow } from "./api";
 import { formatDateTime } from "./ReportView";
+import { LoadingState } from "./States";
 import {
   capillaryColorLabels,
   capillaryFingerLabels,
@@ -120,7 +121,7 @@ export function TrialDataScreen({ onBack }: { onBack: () => void }) {
         </p>
       </div>
 
-      {names.isPending && <p className="text-lg text-[var(--dim)]">読み込んでいます…</p>}
+      {names.isPending && <LoadingState compact />}
       {names.error && (
         <p role="alert" className="text-lg text-[var(--alert)]">
           試験名の読み込みに失敗しました。もう一度お試しください。
@@ -152,9 +153,7 @@ export function TrialDataScreen({ onBack }: { onBack: () => void }) {
             </select>
           </label>
 
-          {data.isPending && selected && (
-            <p className="text-lg text-[var(--dim)]">読み込んでいます…</p>
-          )}
+          {data.isPending && selected && <LoadingState compact />}
           {data.error && (
             <p role="alert" className="text-lg text-[var(--alert)]">
               試験データの読み込みに失敗しました。もう一度お試しください。

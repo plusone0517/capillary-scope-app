@@ -4,6 +4,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useAuth, logout } from "../auth/AuthGate";
 import { CapillaryApp } from "../CapillaryApp";
+import { LogoMark } from "../Logo";
 
 const queryClient = new QueryClient();
 
@@ -14,7 +15,12 @@ export function HomePage() {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <h1>毛細血管 分析アプリ</h1>
+        <div className="flex items-center gap-3">
+          <span className="logo-chip">
+            <LogoMark size={32} />
+          </span>
+          <h1>毛細血管 観察・記録システム</h1>
+        </div>
         <div className="header-user">
           <span>{staff?.displayName ?? ""}（{staff?.email ?? ""}）</span>
           <button type="button" className="secondary-button" onClick={() => void logout()}>
