@@ -9,7 +9,12 @@ import {
   type CreateObservationArgs,
   type UpdateObservationArgs,
 } from "./api";
-import { CapturePanel } from "./CapturePanel";
+import {
+  CaptureControls,
+  CaptureIntro,
+  CaptureMediaDisplay,
+  useCapturePanel,
+} from "./CapturePanel";
 import { CompareScreen } from "./CompareView";
 import { FlowMeasure } from "./FlowMeasure";
 import { TrialDataScreen } from "./TrialData";
@@ -448,6 +453,17 @@ function NewScreen({ go, trialMode }: { go: (v: View) => void; trialMode: boolea
   const [video, setVideo] = useState<CapturedVideo | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const cap = useCapturePanel({
+    images,
+    primaryIndex,
+    onChange: (next, nextPrimary) => {
+      setImages(next);
+      setPrimaryIndex(nextPrimary);
+    },
+    video,
+    onVideoChange: setVideo,
+  });
+
   const create = useMutation({
     mutationFn: async () => {
       const payload = findingsToPayload(form);
@@ -506,37 +522,39 @@ function NewScreen({ go, trialMode }: { go: (v: View) => void; trialMode: boolea
         </button>
       </div>
 
-      <CapturePanel
-        images={images}
-        primaryIndex={primaryIndex}
-        onChange={(next, nextPrimary) => {
-          setImages(next);
-          setPrimaryIndex(nextPrimary);
-        }}
-        video={video}
-        onVideoChange={setVideo}
-      />
-
-      <FindingsForm
-        value={form}
-        onChange={setForm}
-        autoSummary={buildAutoSummary(form)}
-        trialMode={trialMode}
-      />
-
-      {error && (
-        <p role="alert" className="text-lg font-medium text-[var(--alert)]">
-          {error}
-        </p>
-      )}
-      <button
-        type="button"
-        disabled={create.isPending}
-        onClick={handleSave}
-        className="min-h-16 rounded-[var(--radius)] bg-[var(--accent)] px-6 text-xl font-bold text-white disabled:opacity-40"
-      >
-        {create.isPending ? "保存しています…" : "保存してレポートを見る"}
-      </button>
+      {/* lg以上：左＝操作・所見フォーム（カラム内スクロール）、右＝画像画面（全面）。
+          lg未満：ラッパーを display:contents にして従来どおりの縦積み
+          （見出し→メディア上部固定→操作→フォーム）に戻す。 */}
+      <div className="flex flex-col gap-8 lg:grid lg:h-[calc(100dvh-12.75rem)] lg:min-h-[400px] lg:grid-cols-[minmax(400px,470px)_minmax(0,1fr)] lg:gap-6">
+        <div className="contents lg:order-1 lg:flex lg:min-h-0 lg:flex-col lg:gap-8 lg:overflow-y-auto lg:pr-1">
+          <CaptureIntro support={cap.support} className="order-1" />
+          <CaptureControls cap={cap} className="order-3" />
+          <div className="order-4">
+            <FindingsForm
+              value={form}
+              onChange={setForm}
+              autoSummary={buildAutoSummary(form)}
+              trialMode={trialMode}
+            />
+          </div>
+          {error && (
+            <p role="alert" className="order-5 text-lg font-medium text-[var(--alert)]">
+              {error}
+            </p>
+          )}
+          <button
+            type="button"
+            disabled={create.isPending}
+            onClick={handleSave}
+            className="order-6 min-h-16 shrink-0 rounded-[var(--radius)] bg-[var(--accent)] px-6 text-xl font-bold text-white disabled:opacity-40"
+          >
+            {create.isPending ? "保存しています…" : "保存してレポートを見る"}
+          </button>
+        </div>
+        <div className="contents lg:order-2 lg:block lg:min-h-0">
+          <CaptureMediaDisplay cap={cap} className="order-2 lg:h-full" />
+        </div>
+      </div>
     </div>
   );
 }
@@ -914,153 +932,168 @@ function EditScreen({
         </button>
       </div>
 
-      <section aria-label="登録済みの画像" className="flex flex-col gap-3">
-        <h2 className="text-xl font-bold text-[var(--text)]">登録済みの画像（{obs.images.length}枚）</h2>
-        {obs.images.length > 0 ? (
-          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-            {obs.images.map((img, i) => (
-              <li
-                key={img.id}
-                className="flex flex-col gap-2 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-2"
+      {/* lg以上：左＝操作・所見フォーム（カラム内スクロール）、右＝画像・動画の表示面。
+          lg未満：ラッパーを display:contents にして従来どおりの縦積みに戻す。 */}
+      <div className="flex flex-col gap-8 lg:grid lg:h-[calc(100dvh-12.75rem)] lg:min-h-[400px] lg:grid-cols-[minmax(400px,470px)_minmax(0,1fr)] lg:gap-6">
+        <div className="contents lg:order-1 lg:flex lg:min-h-0 lg:flex-col lg:gap-8 lg:overflow-y-auto lg:pr-1">
+          {obs.images.length < 5 && (
+            <div className="order-2 flex flex-col gap-3">
+              <button
+                type="button"
+                disabled={addImage.isPending}
+                onClick={() => addFileRef.current?.click()}
+                className="min-h-14 self-start rounded-[var(--radius)] border-2 border-[var(--accent)] bg-[var(--surface)] px-5 text-lg font-bold text-[var(--accent-strong)] disabled:opacity-40"
               >
-                <img
-                  src={img.url}
-                  alt={`観察画像 ${i + 1}`}
-                  className="aspect-[4/3] w-full rounded object-cover"
-                />
-                {img.isPrimary ? (
-                  <span className="text-center text-base font-bold text-[var(--accent-strong)]">
-                    代表画像
-                  </span>
-                ) : (
+                {addImage.isPending ? "追加しています…" : "画像ファイルを追加する"}
+              </button>
+              <input
+                ref={addFileRef}
+                type="file"
+                accept="image/*"
+                aria-label="画像ファイルを追加する"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) addImage.mutate(file);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+          )}
+
+          <div className="order-4 flex flex-col gap-3">
+            {obs.video ? (
+              <>
+                <p className="text-base text-[var(--dim)]">
+                  動画を差し替えると、保存済みの血流速度の計測結果は消えます。新しい動画で測り直してください。計測はレポート画面の「血流速度を測る（試作）」から行います。
+                </p>
+                <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    onClick={() => setPrimary.mutate(img.id)}
-                    className="min-h-11 rounded border border-[var(--border)] px-2 text-base text-[var(--text)]"
+                    disabled={replaceVideo.isPending}
+                    onClick={() => videoFileRef.current?.click()}
+                    className="min-h-14 rounded-[var(--radius)] border-2 border-[var(--accent)] bg-[var(--surface)] px-5 text-lg font-bold text-[var(--accent-strong)] disabled:opacity-40"
                   >
-                    代表にする
+                    {replaceVideo.isPending ? "設定しています…" : "動画ファイルで差し替える"}
                   </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => removeImage.mutate(img.id)}
-                  aria-label={`画像 ${i + 1} を削除`}
-                  className="min-h-11 rounded border border-[var(--border)] px-2 text-base text-[var(--alert)]"
-                >
-                  削除
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-lg text-[var(--dim)]">画像は登録されていません。</p>
-        )}
-        {obs.images.length < 5 && (
-          <>
-            <button
-              type="button"
-              disabled={addImage.isPending}
-              onClick={() => addFileRef.current?.click()}
-              className="min-h-14 self-start rounded-[var(--radius)] border-2 border-[var(--accent)] bg-[var(--surface)] px-5 text-lg font-bold text-[var(--accent-strong)] disabled:opacity-40"
-            >
-              {addImage.isPending ? "追加しています…" : "画像ファイルを追加する"}
-            </button>
-            <input
-              ref={addFileRef}
-              type="file"
-              accept="image/*"
-              aria-label="画像ファイルを追加する"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) addImage.mutate(file);
-                e.target.value = "";
-              }}
-            />
-          </>
-        )}
-      </section>
-
-      <section aria-label="登録済みの動画" className="flex flex-col gap-3">
-        <h2 className="text-xl font-bold text-[var(--text)]">登録済みの動画</h2>
-        {obs.video ? (
-          <>
-            <video
-              src={obs.video.url}
-              controls
-              playsInline
-              aria-label="登録済みの観察動画"
-              className="aspect-video w-full rounded-[var(--radius)] border border-[var(--border)] bg-black"
-            />
-            <p className="text-base text-[var(--dim)]">
-              動画を差し替えると、保存済みの血流速度の計測結果は消えます。新しい動画で測り直してください。計測はレポート画面の「血流速度を測る（試作）」から行います。
-            </p>
-            <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={removeVideo.isPending}
+                    onClick={() => removeVideo.mutate()}
+                    className="min-h-14 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-5 text-lg text-[var(--alert)] disabled:opacity-40"
+                  >
+                    動画を削除する（計測結果も消えます）
+                  </button>
+                </div>
+              </>
+            ) : (
               <button
                 type="button"
                 disabled={replaceVideo.isPending}
                 onClick={() => videoFileRef.current?.click()}
-                className="min-h-14 rounded-[var(--radius)] border-2 border-[var(--accent)] bg-[var(--surface)] px-5 text-lg font-bold text-[var(--accent-strong)] disabled:opacity-40"
+                className="min-h-14 self-start rounded-[var(--radius)] border-2 border-[var(--accent)] bg-[var(--surface)] px-5 text-lg font-bold text-[var(--accent-strong)] disabled:opacity-40"
               >
-                {replaceVideo.isPending ? "設定しています…" : "動画ファイルで差し替える"}
+                {replaceVideo.isPending ? "設定しています…" : "動画ファイルを追加する"}
               </button>
-              <button
-                type="button"
-                disabled={removeVideo.isPending}
-                onClick={() => removeVideo.mutate()}
-                className="min-h-14 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-5 text-lg text-[var(--alert)] disabled:opacity-40"
-              >
-                動画を削除する（計測結果も消えます）
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <p className="text-lg text-[var(--dim)]">動画は登録されていません。</p>
-            <button
-              type="button"
-              disabled={replaceVideo.isPending}
-              onClick={() => videoFileRef.current?.click()}
-              className="min-h-14 self-start rounded-[var(--radius)] border-2 border-[var(--accent)] bg-[var(--surface)] px-5 text-lg font-bold text-[var(--accent-strong)] disabled:opacity-40"
-            >
-              {replaceVideo.isPending ? "設定しています…" : "動画ファイルを追加する"}
-            </button>
-          </>
-        )}
-        <input
-          ref={videoFileRef}
-          type="file"
-          accept="video/webm,video/mp4"
-          aria-label="動画ファイルを設定する"
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) replaceVideo.mutate(file);
-            e.target.value = "";
-          }}
-        />
-      </section>
+            )}
+            <input
+              ref={videoFileRef}
+              type="file"
+              accept="video/webm,video/mp4"
+              aria-label="動画ファイルを設定する"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) replaceVideo.mutate(file);
+                e.target.value = "";
+              }}
+            />
+          </div>
 
-      <FindingsForm
-        value={form}
-        onChange={setForm}
-        autoSummary={buildAutoSummary(form)}
-        trialMode={trialMode}
-      />
+          <div className="order-5">
+            <FindingsForm
+              value={form}
+              onChange={setForm}
+              autoSummary={buildAutoSummary(form)}
+              trialMode={trialMode}
+            />
+          </div>
 
-      {error && (
-        <p role="alert" className="text-lg font-medium text-[var(--alert)]">
-          {error}
-        </p>
-      )}
-      <button
-        type="button"
-        disabled={update.isPending}
-        onClick={handleSave}
-        className="min-h-16 rounded-[var(--radius)] bg-[var(--accent)] px-6 text-xl font-bold text-white disabled:opacity-40"
-      >
-        {update.isPending ? "保存しています…" : "変更を保存する"}
-      </button>
+          {error && (
+            <p role="alert" className="order-6 text-lg font-medium text-[var(--alert)]">
+              {error}
+            </p>
+          )}
+          <button
+            type="button"
+            disabled={update.isPending}
+            onClick={handleSave}
+            className="order-7 min-h-16 shrink-0 rounded-[var(--radius)] bg-[var(--accent)] px-6 text-xl font-bold text-white disabled:opacity-40"
+          >
+            {update.isPending ? "保存しています…" : "変更を保存する"}
+          </button>
+        </div>
+
+        <div className="contents lg:order-2 lg:flex lg:min-h-0 lg:flex-col lg:gap-8 lg:overflow-y-auto">
+          <section aria-label="登録済みの画像" className="order-1 flex flex-col gap-3">
+            <h2 className="text-xl font-bold text-[var(--text)]">登録済みの画像（{obs.images.length}枚）</h2>
+            {obs.images.length > 0 ? (
+              <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3">
+                {obs.images.map((img, i) => (
+                  <li
+                    key={img.id}
+                    className="flex flex-col gap-2 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-2"
+                  >
+                    <img
+                      src={img.url}
+                      alt={`観察画像 ${i + 1}`}
+                      className="aspect-[4/3] w-full rounded object-cover"
+                    />
+                    {img.isPrimary ? (
+                      <span className="text-center text-base font-bold text-[var(--accent-strong)]">
+                        代表画像
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setPrimary.mutate(img.id)}
+                        className="min-h-11 rounded border border-[var(--border)] px-2 text-base text-[var(--text)]"
+                      >
+                        代表にする
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeImage.mutate(img.id)}
+                      aria-label={`画像 ${i + 1} を削除`}
+                      className="min-h-11 rounded border border-[var(--border)] px-2 text-base text-[var(--alert)]"
+                    >
+                      削除
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-lg text-[var(--dim)]">画像は登録されていません。</p>
+            )}
+          </section>
+
+          <section aria-label="登録済みの動画" className="order-3 flex flex-col gap-3">
+            <h2 className="text-xl font-bold text-[var(--text)]">登録済みの動画</h2>
+            {obs.video ? (
+              <video
+                src={obs.video.url}
+                controls
+                playsInline
+                aria-label="登録済みの観察動画"
+                className="aspect-video w-full rounded-[var(--radius)] border border-[var(--border)] bg-black"
+              />
+            ) : (
+              <p className="text-lg text-[var(--dim)]">動画は登録されていません。</p>
+            )}
+          </section>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1129,9 +1162,15 @@ export function CapillaryApp() {
     }
   };
 
+  // 観察の入力・編集画面は分割レイアウトで画像を大きく見せるため幅を広げる。
+  // それ以外の画面の幅は従来どおり。
+  const wideView = view.kind === "new" || view.kind === "edit";
+
   return (
     <div className="min-h-screen bg-[var(--bg)]">
-      <main className="mx-auto w-full max-w-6xl px-4 pb-10 pt-4 sm:px-6">
+      <main
+        className={`mx-auto w-full px-4 pb-10 pt-4 sm:px-6 ${wideView ? "max-w-[1680px]" : "max-w-6xl"}`}
+      >
         {view.kind === "list" && (
           <ListScreen go={go} trialMode={trialMode} onTrialModeChange={changeTrialMode} />
         )}

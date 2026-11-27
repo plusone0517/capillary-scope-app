@@ -4,6 +4,13 @@
 // 対応環境は Windows PC（Chrome/Edge）と iPad（Safari）。
 // 撮影は video要素 + canvas のみ。デバイス一覧は許可取得後に読み直す
 // （Safariは許可前にラベルが返らないため）。
+//
+// 構成：状態と操作ロジックは useCapturePanel フックに集約し、表示は
+// CaptureIntro（見出しと注意）／CaptureMediaDisplay（映像・画像の表示面）／
+// CaptureControls（操作部）の3部品に分ける。
+// 観察入力画面では、横幅の広い画面（lg以上）で「左＝操作・フォーム（カラム内
+// スクロール）、右＝画像画面（全面）」の分割レイアウトに組み替えられるよう、
+// メディア表示部はレスポンシブに切り替わる（lg未満は従来どおり上部sticky固定）。
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -30,7 +37,8 @@ type Props = {
   onVideoChange: (video: CapturedVideo | null) => void;
 };
 
-export function CapturePanel({
+/** 撮影まわりの状態と操作をまとめたフック。表示部品はこれを受け取って描く。 */
+export function useCapturePanel({
   images,
   primaryIndex,
   onChange,
@@ -201,11 +209,11 @@ export function CapturePanel({
   }, [support.kind, stopStream]);
 
   const handleCapture = async () => {
-    const video = videoRef.current;
-    if (!video || images.length >= MAX_IMAGES) return;
+    const videoEl = videoRef.current;
+    if (!videoEl || images.length >= MAX_IMAGES) return;
     setBusy(true);
     try {
-      const captured = await captureFromVideo(video);
+      const captured = await captureFromVideo(videoEl);
       const next = [...images, captured];
       onChange(next, images.length === 0 ? 0 : primaryIndex);
     } catch (e) {
@@ -247,10 +255,53 @@ export function CapturePanel({
     onChange(next, next.length === 0 ? 0 : nextPrimary);
   };
 
+  return {
+    // 親から受けた値
+    images,
+    primaryIndex,
+    onChange,
+    video,
+    // 内部の状態と参照
+    videoRef,
+    fileInputRef,
+    videoFileInputRef,
+    support,
+    recorderOk,
+    ipad,
+    devices,
+    deviceId,
+    setDeviceId,
+    cameraOn,
+    cameraError,
+    busy,
+    recording,
+    recordElapsed,
+    // 操作
+    startStream,
+    stopStream,
+    startRecording,
+    stopRecording,
+    handleCapture,
+    handleFiles,
+    handleVideoFile,
+    removeImage,
+    removeVideo,
+  };
+}
+
+export type CapturePanelApi = ReturnType<typeof useCapturePanel>;
+
+/** 見出しと、端末・ブラウザに関する注意。操作カラムの先頭に置く。 */
+export function CaptureIntro({
+  support,
+  className = "",
+}: {
+  support: CapturePanelApi["support"];
+  className?: string;
+}) {
   return (
-    <>
-      <div className="flex flex-col gap-4">
-        <h2 className="text-xl font-bold text-[var(--text)]">1. 撮影・画像と動画の取り込み</h2>
+    <div className={`flex flex-col gap-4 ${className}`}>
+      <h2 className="text-xl font-bold text-[var(--text)]">1. 撮影・画像と動画の取り込み</h2>
 
       {support.kind === "iphone" && (
         <div
@@ -268,84 +319,178 @@ export function CapturePanel({
           このブラウザではカメラ機能が使えません。院内PCのChrome/Edgeで開くか、下の「画像ファイルから取り込む」をお使いください。
         </div>
       )}
+    </div>
+  );
+}
 
-      </div>
+/**
+ * メディア表示部：ライブ映像・撮影済み画像・取り込み済み動画の再生。
+ * lg未満では従来どおり画面上部に sticky 固定される帯として振る舞い、
+ * lg以上では分割レイアウトの右カラム全面（高さいっぱい）に広がる。
+ * 取り込み済み動画の再生は lg未満では操作部側（CaptureControls）に出し、
+ * lg以上ではこの表示面に出す。
+ */
+export function CaptureMediaDisplay({
+  cap,
+  className = "",
+}: {
+  cap: CapturePanelApi;
+  className?: string;
+}) {
+  const {
+    images,
+    primaryIndex,
+    onChange,
+    video,
+    videoRef,
+    support,
+    cameraOn,
+    recording,
+    recordElapsed,
+    removeImage,
+    removeVideo,
+  } = cap;
 
-      {/* 固定エリア：ライブプレビューと撮影済み画像は画面上部に貼り付けて常に見えるようにする。
-          高さは抑え、下の入力項目のスクロールを邪魔しない大きさにする。 */}
-      {(support.kind === "ok" || images.length > 0) && (
-        <div className="sticky top-0 z-30 -mx-4 flex flex-col gap-2 border-b border-[var(--border)] bg-[var(--bg)] px-4 py-2 shadow-[0_8px_16px_-12px_rgba(0,0,0,0.4)] sm:-mx-6 sm:px-6">
-          {support.kind === "ok" && (
-            <div className="relative overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-black">
-              <video
-                ref={videoRef}
-                playsInline
-                muted
-                aria-label="スコープのライブプレビュー"
-                className="h-44 w-full object-contain sm:h-60"
-              />
-              {!cameraOn && (
-                <p className="pointer-events-none absolute inset-0 flex items-center justify-center px-4 text-center text-base text-white/75">
-                  カメラは停止中です（下の「カメラを開始」で映像が出ます）
-                </p>
-              )}
-              {recording && (
-                <p
-                  className="absolute left-2 top-2 rounded bg-[var(--alert)] px-2 py-0.5 text-sm font-bold text-white"
-                  aria-live="polite"
-                >
-                  ● 録画中 {recordElapsed.toFixed(0)}秒
-                </p>
-              )}
-            </div>
+  if (support.kind !== "ok" && images.length === 0 && !video) return null;
+
+  return (
+    <div
+      className={`sticky top-0 z-30 -mx-4 flex flex-col gap-2 border-b border-[var(--border)] bg-[var(--bg)] px-4 py-2 shadow-[0_8px_16px_-12px_rgba(0,0,0,0.4)] sm:-mx-6 sm:px-6 lg:static lg:z-auto lg:mx-0 lg:min-h-0 lg:gap-3 lg:border-b-0 lg:bg-transparent lg:px-0 lg:py-0 lg:shadow-none ${className}`}
+    >
+      {support.kind === "ok" && (
+        <div className="relative overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-black lg:min-h-0 lg:flex-1">
+          <video
+            ref={videoRef}
+            playsInline
+            muted
+            aria-label="スコープのライブプレビュー"
+            className="h-44 w-full object-contain sm:h-60 lg:h-full"
+          />
+          {!cameraOn && (
+            <p className="pointer-events-none absolute inset-0 flex items-center justify-center px-4 text-center text-base text-white/75">
+              カメラは停止中です（下の「カメラを開始」で映像が出ます）
+            </p>
           )}
-          {images.length > 0 && (
-            <div>
-              <p className="mb-1 text-base font-medium text-[var(--text)]">
-                撮影・取り込み済みの画像（{images.length}枚）―
-                画像を押すと代表画像になります
-              </p>
-              <ul className="flex gap-2 overflow-x-auto pb-1">
-                {images.map((img, i) => (
-                  <li
-                    key={img.previewUrl}
-                    className="flex w-24 shrink-0 flex-col gap-1"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => onChange(images, i)}
-                      aria-label={`画像 ${i + 1} を代表画像にする`}
-                      aria-pressed={i === primaryIndex}
-                      className="relative block overflow-hidden rounded"
-                    >
-                      <img
-                        src={img.previewUrl}
-                        alt={`観察画像 ${i + 1}`}
-                        className="aspect-[4/3] w-full object-cover"
-                      />
-                      {i === primaryIndex && (
-                        <span className="absolute inset-x-0 bottom-0 bg-[var(--accent)] px-1 py-0.5 text-center text-xs font-bold text-white">
-                          代表画像
-                        </span>
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removeImage(i)}
-                      aria-label={`画像 ${i + 1} を削除`}
-                      className="min-h-11 rounded border border-[var(--border)] bg-[var(--surface)] px-2 text-sm text-[var(--alert)]"
-                    >
-                      削除
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
+          {recording && (
+            <p
+              className="absolute left-2 top-2 rounded bg-[var(--alert)] px-2 py-0.5 text-sm font-bold text-white"
+              aria-live="polite"
+            >
+              ● 録画中 {recordElapsed.toFixed(0)}秒
+            </p>
           )}
         </div>
       )}
+      {images.length > 0 && (
+        <div className="lg:shrink-0">
+          <p className="mb-1 text-base font-medium text-[var(--text)]">
+            撮影・取り込み済みの画像（{images.length}枚）―
+            画像を押すと代表画像になります
+          </p>
+          <ul className="flex gap-2 overflow-x-auto pb-1 lg:flex-wrap lg:overflow-x-visible">
+            {images.map((img, i) => (
+              <li
+                key={img.previewUrl}
+                className="flex w-24 shrink-0 flex-col gap-1 lg:w-36"
+              >
+                <button
+                  type="button"
+                  onClick={() => onChange(images, i)}
+                  aria-label={`画像 ${i + 1} を代表画像にする`}
+                  aria-pressed={i === primaryIndex}
+                  className="relative block overflow-hidden rounded"
+                >
+                  <img
+                    src={img.previewUrl}
+                    alt={`観察画像 ${i + 1}`}
+                    className="aspect-[4/3] w-full object-cover"
+                  />
+                  {i === primaryIndex && (
+                    <span className="absolute inset-x-0 bottom-0 bg-[var(--accent)] px-1 py-0.5 text-center text-xs font-bold text-white">
+                      代表画像
+                    </span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removeImage(i)}
+                  aria-label={`画像 ${i + 1} を削除`}
+                  className="min-h-11 rounded border border-[var(--border)] bg-[var(--surface)] px-2 text-sm text-[var(--alert)]"
+                >
+                  削除
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {video && (
+        <div className="hidden flex-col gap-2 lg:flex lg:shrink-0">
+          <p className="text-lg font-medium text-[var(--text)]">
+            取り込み済みの動画
+            {video.durationSec != null && `（約${video.durationSec.toFixed(0)}秒）`}
+          </p>
+          <video
+            src={video.previewUrl}
+            controls
+            playsInline
+            aria-label="取り込み済みの観察動画"
+            className="aspect-video w-full rounded-[var(--radius)] border border-[var(--border)] bg-black lg:max-h-[30dvh]"
+          />
+          <button
+            type="button"
+            onClick={removeVideo}
+            aria-label="動画を削除"
+            className="min-h-11 self-start rounded border border-[var(--border)] bg-[var(--surface)] px-4 text-base text-[var(--alert)]"
+          >
+            動画を削除する
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
-      <section aria-label="撮影の操作" className="flex flex-col gap-4">
+/**
+ * 操作部：カメラ選択・開始/停止、撮影ボタン、動画の撮影コントロール、
+ * ファイル取り込み、エラー表示。取り込み済み動画の再生ブロックは
+ * lg未満でのみここに出す（lg以上は CaptureMediaDisplay 側）。
+ */
+export function CaptureControls({
+  cap,
+  className = "",
+}: {
+  cap: CapturePanelApi;
+  className?: string;
+}) {
+  const {
+    images,
+    video,
+    fileInputRef,
+    videoFileInputRef,
+    support,
+    recorderOk,
+    ipad,
+    devices,
+    deviceId,
+    setDeviceId,
+    cameraOn,
+    cameraError,
+    busy,
+    recording,
+    recordElapsed,
+    startStream,
+    stopStream,
+    startRecording,
+    stopRecording,
+    handleCapture,
+    handleFiles,
+    handleVideoFile,
+    removeVideo,
+  } = cap;
+
+  return (
+    <section aria-label="撮影の操作" className={`flex flex-col gap-4 ${className}`}>
       {support.kind === "ok" && (
         <>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -463,7 +608,7 @@ export function CapturePanel({
       </div>
 
       {video && (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2 lg:hidden">
           <p className="text-lg font-medium text-[var(--text)]">
             取り込み済みの動画
             {video.durationSec != null && `（約${video.durationSec.toFixed(0)}秒）`}
@@ -526,7 +671,18 @@ export function CapturePanel({
           撮り直す場合は、画面上部に固定された画像一覧で削除してからもう一度撮影してください。
         </p>
       )}
-      </section>
+    </section>
+  );
+}
+
+/** 従来どおりの縦積み構成（見出し→メディア→操作）。分割レイアウトを使わない場合の入口。 */
+export function CapturePanel(props: Props) {
+  const cap = useCapturePanel(props);
+  return (
+    <>
+      <CaptureIntro support={cap.support} />
+      <CaptureMediaDisplay cap={cap} />
+      <CaptureControls cap={cap} />
     </>
   );
 }
