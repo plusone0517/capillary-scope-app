@@ -316,7 +316,7 @@ export function FindingsForm({
                 onClick={() => togglePattern(pattern.code)}
                 className={`flex min-h-14 flex-col gap-2 rounded-[var(--radius)] border-2 p-4 text-left ${
                   selected
-                    ? "border-[var(--accent)] bg-[var(--paper)]"
+                    ? "border-[var(--accent)] bg-[var(--accent-bg)]"
                     : "border-[var(--border)] bg-[var(--surface)]"
                 }`}
               >
@@ -427,7 +427,7 @@ export function FindingsForm({
             {value.interventions.map((iv, i) => (
               <div
                 key={i}
-                className="flex flex-col gap-3 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4"
+                className="flex flex-col gap-3 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-card)]"
               >
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className={labelClass}>

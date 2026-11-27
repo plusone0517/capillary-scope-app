@@ -62,7 +62,7 @@ function MediaSide({
           controls
           playsInline
           aria-label={`${label}の観察動画`}
-          className="aspect-video w-full rounded-[var(--radius)] border border-[var(--border)] bg-black"
+          className="aspect-video w-full rounded-[var(--radius)] border border-[var(--border)] bg-[var(--video-bg)]"
         />
       ) : (
         <p className="text-base text-[var(--dim)]">動画は登録されていません。</p>
@@ -83,9 +83,9 @@ function DiffCard({
   diffText: string | null;
 }) {
   return (
-    <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
+    <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-card)]">
       <p className="text-base font-bold text-[var(--dim)]">{title}</p>
-      <p className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-2xl font-bold text-[var(--text)]">
+      <p className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-2xl font-bold tracking-wide text-[var(--heading)]">
         <span>{beforeText}</span>
         <span aria-hidden="true">→</span>
         <span>{afterText}</span>
@@ -246,7 +246,7 @@ export function CompareScreen({
       </div>
 
       <div>
-        <h1 className="text-2xl font-bold text-[var(--text)]">ビフォアアフター比較</h1>
+        <h1 className="text-2xl font-bold tracking-wide text-[var(--heading)]">ビフォアアフター比較</h1>
         <p className="mt-1 text-lg text-[var(--text)]">
           対象：{after.subjectName}
           {after.subjectId && (
@@ -277,7 +277,7 @@ export function CompareScreen({
           </ul>
         </div>
       ) : (
-        <p className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 text-lg text-[var(--text)]">
+        <p className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-card)] text-lg text-[var(--text)]">
           {sameFinger
             ? `同じ指（${fingerLabel(after.finger)}）同士の比較です。撮影条件もそろっています。`
             : "撮影条件はそろっています。"}
@@ -301,7 +301,7 @@ export function CompareScreen({
       {trialMode && (
         <section
           aria-label="この間に実施したこと"
-          className="flex flex-col gap-2 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4"
+          className="flex flex-col gap-2 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-card)]"
         >
           <h2 className="text-xl font-bold text-[var(--text)]">この間に実施したこと</h2>
           {(trialName || trialGroup) && (

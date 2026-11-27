@@ -241,7 +241,7 @@ function ListScreen({
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-bold text-[var(--text)]">観察レポート一覧</h1>
+        <h1 className="text-2xl font-bold tracking-wide text-[var(--heading)]">観察レポート一覧</h1>
         <div className="flex flex-wrap items-center gap-3">
           <TrialModeToggle trialMode={trialMode} onChange={onTrialModeChange} />
           <button
@@ -255,7 +255,7 @@ function ListScreen({
       </div>
 
       {trialMode && (
-        <div className="flex flex-col gap-2 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-card)] sm:flex-row sm:items-center sm:justify-between">
           <p className="text-base leading-relaxed text-[var(--text)]">
             試験モードがONです。観察の入力・編集で試験名・群・実施内容を記録でき、ビフォアアフターでは「この間に実施したこと」が表示されます。
           </p>
@@ -296,7 +296,7 @@ function ListScreen({
       </p>
 
       {selectedObs.length > 0 && (
-        <div className="flex flex-col gap-2 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
+        <div className="flex flex-col gap-2 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-card)]">
           <p className="text-lg text-[var(--text)]">
             比較に選択中：{selectedObs.length}件
             {selectedObs.map((o) => (
@@ -351,7 +351,7 @@ function ListScreen({
           {list.data.observations.map((obs) => (
             <li
               key={obs.id}
-              className="flex overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)]"
+              className="flex overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-card)]"
             >
               <button
                 type="button"
@@ -512,7 +512,7 @@ function NewScreen({ go, trialMode }: { go: (v: View) => void; trialMode: boolea
   return (
     <div className="flex flex-col gap-8">
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold text-[var(--text)]">新しい観察</h1>
+        <h1 className="text-2xl font-bold tracking-wide text-[var(--heading)]">新しい観察</h1>
         <button
           type="button"
           onClick={() => go({ kind: "list" })}
@@ -922,7 +922,7 @@ function EditScreen({
   return (
     <div className="flex flex-col gap-8">
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold text-[var(--text)]">レポートを編集</h1>
+        <h1 className="text-2xl font-bold tracking-wide text-[var(--heading)]">レポートを編集</h1>
         <button
           type="button"
           onClick={() => go({ kind: "report", id })}
@@ -1086,7 +1086,7 @@ function EditScreen({
                 controls
                 playsInline
                 aria-label="登録済みの観察動画"
-                className="aspect-video w-full rounded-[var(--radius)] border border-[var(--border)] bg-black"
+                className="aspect-video w-full rounded-[var(--radius)] border border-[var(--border)] bg-[var(--video-bg)]"
               />
             ) : (
               <p className="text-lg text-[var(--dim)]">動画は登録されていません。</p>

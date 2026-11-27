@@ -114,7 +114,7 @@ export function TrialDataScreen({ onBack }: { onBack: () => void }) {
       </div>
 
       <div>
-        <h1 className="text-2xl font-bold text-[var(--text)]">試験データ（CSV書き出し）</h1>
+        <h1 className="text-2xl font-bold tracking-wide text-[var(--heading)]">試験データ（CSV書き出し）</h1>
         <p className="mt-1 text-base leading-relaxed text-[var(--dim)]">
           試験名で絞り込んだ観察の一覧です。観察日・対象者・密度・血流速度・流れ・色・形のパターン・実施内容をCSVで書き出せます。
         </p>

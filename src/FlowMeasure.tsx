@@ -484,7 +484,7 @@ export function FlowMeasure({
   return (
     <div className="flex flex-col gap-5">
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold text-[var(--text)]">
+        <h1 className="text-2xl font-bold tracking-wide text-[var(--heading)]">
           血流速度の計測（試作）
         </h1>
         <button
@@ -506,9 +506,9 @@ export function FlowMeasure({
       </div>
 
       {savedResult && (
-        <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
-          <p className="text-lg font-bold text-[var(--text)]">保存済みの計測結果</p>
-          <p className="mt-1 text-lg text-[var(--text)]">
+        <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-card)]">
+          <p className="text-lg font-bold text-[var(--heading)]">保存済みの計測結果</p>
+          <p className="mt-1 text-xl font-bold text-[var(--heading)]">
             血流速度（試作・参考値）：
             {savedResult.mmPerSec != null
               ? `${savedResult.mmPerSec.toFixed(2)} mm/秒`
@@ -542,7 +542,7 @@ export function FlowMeasure({
         <canvas
           ref={frameCanvasRef}
           aria-label="動画の1フレーム。タップして線の始点と終点を指定"
-          className="w-full cursor-crosshair rounded-[var(--radius)] border border-[var(--border)] bg-black"
+          className="w-full cursor-crosshair rounded-[var(--radius)] border border-[var(--border)] bg-[var(--video-bg)]"
           onPointerDown={handleFrameTap}
         />
         <p className="text-base text-[var(--dim)]" aria-live="polite">
@@ -578,7 +578,7 @@ export function FlowMeasure({
           <canvas
             ref={kymoCanvasRef}
             aria-label="時空間画像。手動モードでは縞に沿って2点をタップ"
-            className={`w-full rounded-[var(--radius)] border border-[var(--border)] bg-black ${
+            className={`w-full rounded-[var(--radius)] border border-[var(--border)] bg-[var(--video-bg)] ${
               manualMode ? "cursor-crosshair" : ""
             }`}
             style={{ imageRendering: "pixelated" }}
@@ -621,12 +621,12 @@ export function FlowMeasure({
             </p>
           )}
 
-          <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4">
-            <p className="text-lg font-bold text-[var(--text)]">
+          <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-card)]">
+            <p className="text-lg font-bold text-[var(--heading)]">
               血流速度（試作・参考値）
             </p>
             {speedPxPerSec != null ? (
-              <p className="mt-1 text-xl font-bold text-[var(--text)]">
+              <p className="mt-1 text-3xl font-bold text-[var(--heading)]">
                 {speedMmPerSec != null
                   ? `${speedMmPerSec.toFixed(2)} mm/秒`
                   : `${speedPxPerSec.toFixed(1)} ピクセル/秒`}
