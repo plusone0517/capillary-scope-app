@@ -349,7 +349,13 @@ export function FindingsForm({
                   {pattern.feature}
                 </span>
                 <span className="text-base leading-relaxed text-[var(--accent-strong)]">
-                  なぜ：{pattern.why}
+                  原因：{pattern.why}
+                </span>
+                <span className="text-sm leading-relaxed text-[var(--dim)]">
+                  重なりやすい症状：{pattern.symptoms}
+                </span>
+                <span className="text-sm leading-relaxed text-[var(--dim)]">
+                  未病の見方：{pattern.mibyo}
                 </span>
               </button>
             );

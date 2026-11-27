@@ -372,7 +372,9 @@ export function ReportBody({
                     />
                     <div className="flex flex-col gap-1">
                       <p className="r-small">{pattern.feature}</p>
-                      <p className="r-why">なぜその形になるか：{pattern.why}</p>
+                      <p className="r-why">原因：{pattern.why}</p>
+                      <p className="r-small">重なりやすい症状：{pattern.symptoms}</p>
+                      <p className="r-small">未病の見方：{pattern.mibyo}</p>
                     </div>
                   </div>
                 </article>
