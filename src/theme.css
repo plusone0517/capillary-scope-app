@@ -1,0 +1,107 @@
+/* 毛細血管 分析アプリ テーマ。
+   臨床的で落ち着いたレポート調：温かい紙色の帯、深いティールのインク。 */
+@import "tailwindcss";
+@import "tailwindcss-safe-area";
+
+@theme {
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 14px;
+  --text-sm--line-height: 20px;
+  --text-base: 16px;
+  --text-base--line-height: 24px;
+  --text-lg: 18px;
+  --text-lg--line-height: 28px;
+  --text-xl: 20px;
+  --text-xl--line-height: 28px;
+  --text-2xl: 24px;
+  --text-2xl--line-height: 32px;
+  --text-3xl: 30px;
+  --text-3xl--line-height: 36px;
+  --text-4xl: 36px;
+  --text-4xl--line-height: 40px;
+  --text-5xl: 48px;
+  --text-5xl--line-height: 52px;
+}
+
+:root {
+  color-scheme: light dark;
+  --bg: #f6f4ee;
+  --surface: #ffffff;
+  --paper: #f3efe7;
+  --text: #21363a;
+  --dim: #5f6f72;
+  --border: #ddd6c6;
+  --accent: #2f6f5e;
+  --accent-strong: #245647;
+  --alert: #b3352b;
+  --alert-bg: #fbeae8;
+  --radius: 12px;
+  --space-surface: var(--surface);
+  --space-surface-alt: var(--paper);
+  --space-muted: var(--dim);
+  --space-border: var(--border);
+  --space-accent: var(--accent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #10181a;
+    --surface: #1a2426;
+    --paper: #22302f;
+    --text: #e8efec;
+    --dim: #9db3ad;
+    --border: #33413f;
+    --accent: #7fc4ae;
+    --accent-strong: #a5d8c6;
+    --alert: #ff9d94;
+    --alert-bg: #40201d;
+  }
+}
+
+/* 院内スタッフ向け：ボタンと入力は指で押しやすい大きさに。 */
+@layer base {
+  button, [role="button"], select, summary, input:not([type="checkbox"], [type="radio"]) {
+    min-height: 2.75rem;
+  }
+  input[type="checkbox"], input[type="radio"] {
+    width: 1.5rem;
+    height: 1.5rem;
+  }
+}
+
+/* ===== レポート（画面表示と印刷で共用。正本SVGのクラス構成に対応） ===== */
+.r-title { font-size: 30px; font-weight: 700; color: var(--text); line-height: 1.3; }
+.r-meta { font-size: 16px; color: var(--dim); line-height: 1.6; }
+.r-sec { font-size: 21px; font-weight: 700; color: var(--text); margin-top: 26px; margin-bottom: 8px; }
+.r-body { font-size: 18px; color: var(--text); line-height: 1.75; }
+.r-small { font-size: 16px; color: var(--text); line-height: 1.7; }
+.r-why { font-size: 16px; color: var(--accent-strong); line-height: 1.7; }
+.r-src { font-size: 13px; color: var(--dim); line-height: 1.6; }
+
+/* ===== 印刷：レポートだけをA4 1枚に収める ===== */
+@media print {
+  @page { size: A4; margin: 11mm; }
+  body { background: #ffffff !important; }
+  body * { visibility: hidden; }
+  #report-print, #report-print * { visibility: visible; }
+  #report-print {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    background: #ffffff !important;
+    color: #21363a !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+  }
+  #report-print .r-title { font-size: 21pt; color: #21363a !important; }
+  #report-print .r-meta { font-size: 10.5pt; color: #5f6f72 !important; }
+  #report-print .r-sec { font-size: 13pt; margin-top: 12pt; margin-bottom: 4pt; color: #21363a !important; }
+  #report-print .r-body { font-size: 11pt; line-height: 1.6; color: #21363a !important; }
+  #report-print .r-small { font-size: 10pt; line-height: 1.55; color: #21363a !important; }
+  #report-print .r-why { font-size: 10pt; line-height: 1.55; color: #2f6f5e !important; }
+  #report-print .r-src { font-size: 8.5pt; color: #9aa39f !important; }
+  #report-print img { max-height: 62mm; object-fit: cover; }
+  .no-print { display: none !important; }
+}
