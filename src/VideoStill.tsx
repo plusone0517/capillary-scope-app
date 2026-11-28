@@ -42,6 +42,18 @@ export function useVideoStill({
   // この動画から切り出して一覧に足した画像（一覧に残っている間は、ボタンを出さない）。
   const [added, setAdded] = useState<{ videoUrl: string; imageUrl: string } | null>(null);
 
+  // 録画中に選んでおいた場面は、動画ごとに一度だけ使う（消したあとの画像は使い回せないため）。
+  const usedBest = useRef<Set<string>>(new Set());
+  const takeFrame = async (v: CapturedVideo): Promise<{ image: CapturedImage; sampled: number }> => {
+    if (v.bestStill && !usedBest.current.has(v.previewUrl)) {
+      usedBest.current.add(v.previewUrl);
+      return v.bestStill;
+    }
+    const { frames, sampled } = await captureSharpestFramesFromVideoUrl(v.previewUrl, 1);
+    if (!frames[0]) throw new Error("no frame");
+    return { image: frames[0].image, sampled };
+  };
+
   const describe = (sampled: number): string =>
     sampled > 1
       ? `動画の${sampled}か所を見比べて、いちばん鮮明な場面を代表画像にしました。`
@@ -54,11 +66,10 @@ export function useVideoStill({
     let cancelled = false;
     setBusy(true);
     setNote("動画から、いちばん鮮明な場面を探しています…");
-    void captureSharpestFramesFromVideoUrl(video.previewUrl, 1)
-      .then(({ frames, sampled }) => {
+    void takeFrame(video)
+      .then((frame) => {
         if (cancelled) return;
-        const frame = frames[0];
-        if (!frame) throw new Error("no frame");
+        const sampled = frame.sampled;
         setImages((current) => (current.length > 0 ? current : [frame.image]));
         setPrimaryIndex(0);
         setAdded({ videoUrl: video.previewUrl, imageUrl: frame.image.previewUrl });
@@ -87,10 +98,9 @@ export function useVideoStill({
     setBusy(true);
     setNote("動画から、いちばん鮮明な場面を探しています…");
     const url = video.previewUrl;
-    void captureSharpestFramesFromVideoUrl(url, 1)
-      .then(({ frames, sampled }) => {
-        const frame = frames[0];
-        if (!frame) throw new Error("no frame");
+    void takeFrame(video)
+      .then((frame) => {
+        const sampled = frame.sampled;
         const at = images.length;
         setImages((current) => [...current, frame.image].slice(0, MAX_IMAGES));
         setPrimaryIndex(Math.min(at, MAX_IMAGES - 1));

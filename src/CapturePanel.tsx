@@ -22,6 +22,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  createBestFrameTracker,
 blobToCapturedVideo,
 captureFromVideo,
 computeZoomRect,
@@ -42,7 +43,8 @@ type SharpnessMeter,
 import { ImageQualityHint } from "./ImageQualityHint";
 
 export const MAX_IMAGES = 5;
-const MAX_RECORD_SEC = 20;
+// 録画の長さ。10秒で自動的に止める（2026-11-28 ユーザー決定。20秒は長かった）。
+const MAX_RECORD_SEC = 10;
 
 /** 手動で選んだカメラを次回も使うため、deviceId を保存するキー。 */
 const CAMERA_STORAGE_KEY = "capillary-scope-camera-device-id";
@@ -473,6 +475,9 @@ export function useCapturePanel({
     setCameraError(null);
     try {
       const recorder = new MediaRecorder(stream, { mimeType });
+      // 録画しながら、いちばん鮮明な場面を覚えておく（0.4秒ごとに測る）。
+      const tracker = videoRef.current ? createBestFrameTracker(videoRef.current) : null;
+      let ticks = 0;
       chunksRef.current = [];
       discardRecordingRef.current = false;
       recorder.ondataavailable = (e) => {
@@ -491,8 +496,12 @@ export function useCapturePanel({
         if (discard) return;
         const blob = new Blob(chunksRef.current, { type: mimeType });
         chunksRef.current = [];
-        void blobToCapturedVideo(blob, elapsed)
-          .then((captured) => onVideoChange(captured))
+        // 録画中に選んでおいた、いちばん鮮明な場面を動画に添える。
+        const picked = tracker ? tracker.finish().catch(() => null) : Promise.resolve(null);
+        void Promise.all([blobToCapturedVideo(blob, elapsed), picked])
+          .then(([captured, bestStill]) =>
+            onVideoChange(bestStill ? { ...captured, bestStill } : captured),
+          )
           .catch(() =>
             setCameraError("動画の保存用データへの変換に失敗しました"),
           );
@@ -505,6 +514,7 @@ export function useCapturePanel({
       recordTimerRef.current = window.setInterval(() => {
         const elapsed = (Date.now() - recordStartRef.current) / 1000;
         setRecordElapsed(elapsed);
+        if (ticks++ % 2 === 0) tracker?.sample();
         if (elapsed >= MAX_RECORD_SEC) stopRecording();
       }, 200);
     } catch {
@@ -1702,7 +1712,7 @@ export function CaptureControls({
               動画の撮影（血流速度の計測用・任意）
             </h3>
             <p className="text-base leading-relaxed text-[var(--text)]">
-              動画は、安静時間をおいて指が落ち着いてから撮ってください。長さは10〜20秒が目安です（最長{MAX_RECORD_SEC}秒で自動的に止まります）。指が動くと計測が不安定になるため、撮影中は指を固定してください。
+              動画は、安静時間をおいて指が落ち着いてから撮ってください。録画は{MAX_RECORD_SEC}秒で自動的に止まります。指が動くと計測が不安定になるため、撮影中は指を固定してください。
             </p>
             {video ? (
               <p className="text-base font-medium text-[var(--accent-strong)]">

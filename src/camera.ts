@@ -188,6 +188,11 @@ export type CapturedVideo = {
   mimeType: "video/webm" | "video/mp4";
   previewUrl: string;
   durationSec: number | null;
+  /**
+   * 録画中に見比べて選んだ、いちばん鮮明な場面の静止画（アプリで録画した動画だけ）。
+   * 録画が終わった時点でもう手元にあるので、動画を見直さずにすぐ代表画像にできる。
+   */
+  bestStill?: { image: CapturedImage; sampled: number };
 };
 
 /** MediaRecorder が使えるか（iPad Safari では使えない環境がある）。 */
@@ -491,6 +496,61 @@ export async function captureSharpestFramesFromVideoUrl(
     video.removeAttribute("src");
     video.load();
   }
+}
+
+/* ============ 録画しながら、いちばん鮮明な場面を覚えておく ============ */
+
+export type BestFrameTracker = {
+  /** いまの映像を1場面として測り、これまででいちばん鮮明なら覚える。 */
+  sample: () => void;
+  /** 覚えた場面を静止画にして返す（1場面も測れていなければ null）。 */
+  finish: () => Promise<{ image: CapturedImage; sampled: number } | null>;
+};
+
+/**
+ * 録画中のライブ映像を定期的に測り、いちばん鮮明な場面をその場で静止画として覚えておく。
+ * 録画したあとで動画を見直す方法（captureSharpestFramesFromVideoUrl）は、
+ * ブラウザで録画した動画では場面の移動に時間がかかる（4K・10秒の動画で約11秒かかった）。
+ * 録画中に選んでおけば待ち時間が無く、動画の圧縮がかかる前の映像なので画もきれい。
+ */
+export function createBestFrameTracker(video: HTMLVideoElement): BestFrameTracker {
+  const scan = document.createElement("canvas");
+  const scanCtx = scan.getContext("2d", { willReadFrequently: true });
+  const best = document.createElement("canvas");
+  const bestCtx = best.getContext("2d");
+  let bestScore = -1;
+  let sampled = 0;
+  let has = false;
+  return {
+    sample() {
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!vw || !vh || !scanCtx || !bestCtx) return;
+      let score = 0;
+      try {
+        scan.width = Math.min(SCAN_WIDTH, vw);
+        scan.height = Math.max(1, Math.round((scan.width * vh) / vw));
+        scanCtx.drawImage(video, 0, 0, scan.width, scan.height);
+        score = frameScore(
+          assessImageQuality(scanCtx.getImageData(0, 0, scan.width, scan.height)),
+        );
+      } catch {
+        // 測れない環境では、最初の場面をそのまま使う。
+      }
+      sampled++;
+      if (has && score <= bestScore) return;
+      const scale = Math.min(1, MAX_DIM / Math.max(vw, vh));
+      best.width = Math.max(1, Math.round(vw * scale));
+      best.height = Math.max(1, Math.round(vh * scale));
+      bestCtx.drawImage(video, 0, 0, best.width, best.height);
+      bestScore = score;
+      has = true;
+    },
+    async finish() {
+      if (!has) return null;
+      return { image: await canvasToCaptured(best), sampled };
+    },
+  };
 }
 
 /* ============ ピントの合い具合（シャープネス指標） ============ */
