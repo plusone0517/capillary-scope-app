@@ -30,6 +30,17 @@ export interface Staff {
 
 export interface Patient {
   displayName: string;
+  /** ふりがな（検索用）。旧データには無い。 */
+  nameKana?: string | null;
+  /** 生年月日（YYYY-MM-DD）。同姓同名の区別と年齢の算出に使う。旧データには無い。 */
+  birthDate?: string | null;
+  /** 性別（female / male / other）。旧データには無い。 */
+  sex?: "female" | "male" | "other" | null;
+  /**
+   * ルーツマイルの会員番号（例：RM-12345678、正規化済み）。データを引くための鍵。
+   * ルーツマイル側で変更されうるため、顧客の同一性はドキュメントIDで保つ。
+   */
+  memberNumber?: string | null;
   /** 院内の対象者ID（カルテ番号など、このアプリ内での識別子）。 */
   patientCode: string;
   /** ルーツマイル会員ID（任意。段階3の自動ひも付け用に予約）。 */

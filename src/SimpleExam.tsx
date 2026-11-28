@@ -12,6 +12,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ConsentFields } from "./ConsentFields";
+import { CustomerPicker, usePreselectedCustomer } from "./CustomerPicker";
+import type { CustomerRecord } from "./customer";
 import { UNCONFIRMED_CONSENT, type ConsentState } from "./consent";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, describeFirebaseError, type AiPatternCandidate } from "./api";
@@ -75,9 +77,17 @@ function flagsFromPatterns(patterns: string[]) {
   };
 }
 
-export function SimpleNewScreen({ go }: { go: SimpleGo }) {
+export function SimpleNewScreen({
+  go,
+  customerId,
+}: {
+  go: SimpleGo;
+  /** 顧客の画面から来たときの顧客ID（最初から選んだ状態にする）。 */
+  customerId?: string;
+}) {
   const queryClient = useQueryClient();
-  const [subjectName, setSubjectName] = useState("");
+  const [customer, setCustomer] = useState<CustomerRecord | null>(null);
+  usePreselectedCustomer(customerId, setCustomer);
   const [consent, setConsent] = useState<ConsentState>(UNCONFIRMED_CONSENT);
   const [images, setImages] = useState<CapturedImage[]>([]);
   const [primaryIndex, setPrimaryIndex] = useState(0);
@@ -234,7 +244,9 @@ export function SimpleNewScreen({ go }: { go: SimpleGo }) {
   const create = useMutation({
     mutationFn: async () => {
       return api.createObservation({
-        subjectName: subjectName.trim(),
+        customerId: customer?.id,
+        subjectName: customer?.displayName ?? "",
+        subjectId: customer?.localCode ?? undefined,
         observedAt: new Date().toISOString(),
         // 一般検査では標準の指（左手・薬指）で記録する。
         finger: "left_ring",
@@ -267,8 +279,8 @@ export function SimpleNewScreen({ go }: { go: SimpleGo }) {
   });
 
   const handleSave = () => {
-    if (!subjectName.trim()) {
-      setError("対象者のお名前を入力してください。");
+    if (!customer) {
+      setError("顧客を選んでください。");
       return;
     }
     setError(null);
@@ -351,18 +363,9 @@ export function SimpleNewScreen({ go }: { go: SimpleGo }) {
       <div className="flex flex-col gap-8 lg:grid lg:h-[calc(100dvh-16.44rem)] lg:min-h-[400px] lg:grid-cols-[minmax(400px,470px)_minmax(0,1fr)] lg:gap-6">
         <div className="contents lg:order-1 lg:flex lg:min-h-0 lg:flex-col lg:gap-8 lg:overflow-y-auto lg:pr-1">
           <section aria-label="対象者" className="order-1 flex flex-col gap-2">
-            <label className="flex flex-col gap-1 text-base font-medium text-[var(--text)]">
-              対象者のお名前（必須）
-              <input
-                aria-label="対象者のお名前"
-                className="min-h-16 w-full rounded-[var(--radius)] border-2 border-[var(--border-strong)] bg-[var(--surface)] px-4 text-xl text-[var(--text)]"
-                value={subjectName}
-                onChange={(e) => setSubjectName(e.target.value)}
-                placeholder="例：山田 花子"
-              />
-            </label>
+            <CustomerPicker value={customer} onChange={setCustomer} />
             <p className="text-base text-[var(--dim)]">
-              日時は自動で記録されます。撮影する指は標準（左手・薬指）として記録します。条件や所見の細かい入力は、研究用モードで行えます。
+              日時は自動で記録されます。撮影する指は標準（左手・薬指）として記録します。
             </p>
             <ConsentFields
               value={consent}

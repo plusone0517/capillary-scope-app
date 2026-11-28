@@ -54,6 +54,14 @@ import {
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions, storage } from "./firebase";
 import {
+  findDuplicate,
+  matchesCustomer,
+  normalizeMemberNumber,
+  validateCustomerInput,
+  type CustomerInput,
+  type CustomerRecord,
+} from "./customer";
+import {
   CONSENT_FORM_VERSION,
   UNCONFIRMED_CONSENT,
   normalizeConsent,
@@ -155,10 +163,16 @@ export type ObservationRecord = {
   interventions: InterventionRecord[];
   /** 同意の記録（旧データは未確認）。 */
   consent: ConsentState;
+  /** この観察の顧客（会員番号・生年月日など）。顧客が読めない場合は null。 */
+  customer: CustomerRecord | null;
 };
 
 export type ObservationListItem = {
   id: string;
+  /** 顧客ID（patients のドキュメントID）。 */
+  patientId: string;
+  /** ルーツマイルの会員番号（未登録は null）。 */
+  memberNumber: string | null;
   subjectName: string;
   subjectId: string | null;
   observedAt: string;
@@ -257,6 +271,11 @@ export type InterventionInput = {
 };
 
 export type ObservationInput = {
+  /**
+   * 顧客ID。指定があれば、この顧客の観察として保存する（氏名での突き合わせはしない）。
+   * 同姓同名の別人が1人に混ざらないよう、画面からは必ずこれを渡す。
+   */
+  customerId?: string;
   subjectName: string;
   subjectId?: string;
   observedAt: string;
@@ -588,6 +607,52 @@ async function loadAllPatients(): Promise<Map<string, Patient>> {
   return map;
 }
 
+function toCustomer(id: string, p: Patient): CustomerRecord {
+  return {
+    id,
+    displayName: p.displayName ?? "",
+    nameKana: p.nameKana ? p.nameKana : null,
+    birthDate: p.birthDate ? p.birthDate : null,
+    sex: p.sex === "female" || p.sex === "male" || p.sex === "other" ? p.sex : null,
+    memberNumber: p.memberNumber ? p.memberNumber : null,
+    localCode: p.patientCode ? p.patientCode : null,
+    note: p.note ? p.note : null,
+  };
+}
+
+async function loadAllCustomers(): Promise<CustomerRecord[]> {
+  const patients = await loadAllPatients();
+  return [...patients.entries()].map(([id, p]) => toCustomer(id, p));
+}
+
+function customerDocFromInput(input: CustomerInput): DocumentData {
+  return {
+    displayName: input.displayName.trim(),
+    nameKana: input.nameKana?.trim() ? input.nameKana.trim() : null,
+    birthDate: input.birthDate ? input.birthDate : null,
+    sex: input.sex ?? null,
+    memberNumber: normalizeMemberNumber(input.memberNumber),
+    patientCode: input.localCode?.trim() ?? "",
+    note: input.note?.trim() ?? "",
+    updatedAt: serverTimestamp(),
+  };
+}
+
+/** 入力の検査と重複の確認。問題があれば日本語のメッセージで例外にする。 */
+async function assertCustomerSavable(input: CustomerInput, ignoreId?: string): Promise<void> {
+  const invalid = validateCustomerInput(input);
+  if (invalid) throw new Error(invalid);
+  const dup = findDuplicate(input, await loadAllCustomers(), ignoreId);
+  if (dup?.kind === "memberNumber")
+    throw new Error(
+      `この会員番号は「${dup.customer.displayName}」さんで登録済みです。一覧から選んでください。`,
+    );
+  if (dup?.kind === "nameAndBirth")
+    throw new Error(
+      `同じお名前・生年月日の方（${dup.customer.displayName}さん）が登録済みです。一覧から選んでください。`,
+    );
+}
+
 async function findOrCreatePatient(
   displayName: string,
   patientCode: string,
@@ -731,6 +796,7 @@ async function toRecord(
     ...study,
     ...base,
     consent: normalizeConsent(obs.consent),
+    customer: patient ? toCustomer(obs.patientId, patient) : null,
   };
 }
 
@@ -835,6 +901,51 @@ async function getObservationDoc(
 
 /* ================= api 本体 ================= */
 
+/** 一覧用の1件を組み立てる（観察一覧と顧客ごとの履歴で共用）。 */
+async function toListItem(
+  id: string,
+  obs: Observation,
+  patient: Patient | null,
+): Promise<ObservationListItem> {
+  const primary =
+    (obs.images ?? []).find((m) => m.isPrimary) ?? (obs.images ?? [])[0];
+  let primaryImageUrl: string | null = null;
+  if (primary) {
+    imageOwnerCache.set(primary.storagePath, id);
+    try {
+      primaryImageUrl = await downloadUrl(primary.storagePath);
+    } catch {
+      primaryImageUrl = null;
+    }
+  }
+  const flow = flowToCompat(obs);
+  return {
+    id,
+    patientId: obs.patientId,
+    memberNumber: patient?.memberNumber ? patient.memberNumber : null,
+    subjectName: patient?.displayName ?? "",
+    subjectId: patient?.patientCode ? patient.patientCode : null,
+    observedAt: obs.recordedAt?.toDate
+      ? obs.recordedAt.toDate().toISOString()
+      : new Date().toISOString(),
+    finger: obs.finger,
+    status: obs.status,
+    hasClinicalFlag: Boolean(
+      obs.clinicalFlags?.giant ||
+        obs.clinicalFlags?.hemorrhage ||
+        obs.clinicalFlags?.loss ||
+        obs.clinicalFlags?.ramified,
+    ),
+    patternCount: (obs.patterns ?? []).length,
+    densityPerMm: obs.densityPerMm ?? null,
+    patternCodes: obs.patterns ?? [],
+    primaryImageUrl,
+    hasVideo: (obs.videos ?? []).length > 0,
+    flowSpeedMmPerSec: flow.flowSpeedMmPerSec,
+    trialName: obs.study?.studyName ? obs.study.studyName : null,
+  };
+}
+
 export const api = {
   async listObservations(args: {
     search?: string;
@@ -853,52 +964,68 @@ export const api = {
     for (const d of snap.docs) {
       const obs = d.data() as Observation;
       const patient = patients.get(obs.patientId);
-      const subjectName = patient?.displayName ?? "";
-      const subjectId = patient?.patientCode ? patient.patientCode : null;
+      // 氏名・ふりがな・会員番号・施設内番号のいずれでも引けるようにする。
       if (
         search &&
-        !subjectName.includes(search) &&
-        !(subjectId ?? "").includes(search)
+        !(patient && matchesCustomer(toCustomer(obs.patientId, patient), search))
       ) {
         continue;
       }
-      const primary =
-        (obs.images ?? []).find((m) => m.isPrimary) ?? (obs.images ?? [])[0];
-      let primaryImageUrl: string | null = null;
-      if (primary) {
-        imageOwnerCache.set(primary.storagePath, d.id);
-        try {
-          primaryImageUrl = await downloadUrl(primary.storagePath);
-        } catch {
-          primaryImageUrl = null;
-        }
-      }
-      const flow = flowToCompat(obs);
-      items.push({
-        id: d.id,
-        subjectName,
-        subjectId,
-        observedAt: obs.recordedAt?.toDate
-          ? obs.recordedAt.toDate().toISOString()
-          : new Date().toISOString(),
-        finger: obs.finger,
-        status: obs.status,
-        hasClinicalFlag: Boolean(
-          obs.clinicalFlags?.giant ||
-            obs.clinicalFlags?.hemorrhage ||
-            obs.clinicalFlags?.loss ||
-            obs.clinicalFlags?.ramified,
-        ),
-        patternCount: (obs.patterns ?? []).length,
-        densityPerMm: obs.densityPerMm ?? null,
-        patternCodes: obs.patterns ?? [],
-        primaryImageUrl,
-        hasVideo: (obs.videos ?? []).length > 0,
-        flowSpeedMmPerSec: flow.flowSpeedMmPerSec,
-        trialName: obs.study?.studyName ? obs.study.studyName : null,
-      });
+      items.push(await toListItem(d.id, obs, patient ?? null));
     }
     return { observations: items.slice(0, args.limit ?? 100) };
+  },
+
+  /* ---------------- 顧客 ---------------- */
+
+  /** 顧客の一覧（氏名・ふりがな・会員番号・施設内番号で絞り込み）。 */
+  async listCustomers(args: { search?: string }): Promise<{ customers: CustomerRecord[] }> {
+    const all = await loadAllCustomers();
+    const search = args.search?.trim() ?? "";
+    const customers = all
+      .filter((c) => matchesCustomer(c, search))
+      .sort((x, y) =>
+        (x.nameKana ?? x.displayName).localeCompare(y.nameKana ?? y.displayName, "ja"),
+      );
+    return { customers };
+  },
+
+  /** 顧客1件と、その人の観察の一覧（新しい順）。 */
+  async getCustomer(args: {
+    id: string;
+  }): Promise<{ customer: CustomerRecord | null; observations: ObservationListItem[] }> {
+    const snap = await getDoc(doc(db, "patients", args.id));
+    if (!snap.exists()) return { customer: null, observations: [] };
+    const patient = snap.data() as Patient;
+    patientCache.set(args.id, patient);
+    const rows = await getDocs(
+      query(collection(db, "observations"), where("patientId", "==", args.id)),
+    );
+    const observations: ObservationListItem[] = [];
+    for (const d of rows.docs) {
+      observations.push(await toListItem(d.id, d.data() as Observation, patient));
+    }
+    observations.sort((x, y) => y.observedAt.localeCompare(x.observedAt));
+    return { customer: toCustomer(args.id, patient), observations };
+  },
+
+  async createCustomer(args: CustomerInput): Promise<{ id: string }> {
+    await assertCustomerSavable(args);
+    const ref = await addDoc(collection(db, "patients"), {
+      ...customerDocFromInput(args),
+      rootsMemberId: null,
+      createdBy: currentUid(),
+      createdAt: serverTimestamp(),
+    });
+    patientCache.delete(ref.id);
+    return { id: ref.id };
+  },
+
+  async updateCustomer(args: CustomerInput & { id: string }): Promise<{ ok: true }> {
+    await assertCustomerSavable(args, args.id);
+    await updateDoc(doc(db, "patients", args.id), customerDocFromInput(args));
+    patientCache.delete(args.id);
+    return { ok: true };
   },
 
   async getObservation(args: {
@@ -945,10 +1072,14 @@ export const api = {
   async createObservation(
     args: CreateObservationArgs,
   ): Promise<{ id: string }> {
-    const patientId = await findOrCreatePatient(
-      args.subjectName.trim(),
-      args.subjectId?.trim() ?? "",
-    );
+    // 顧客IDがあればその顧客の観察として保存する。氏名での突き合わせは、
+    // 顧客IDを渡さない旧経路のためだけに残す。
+    const patientId =
+      args.customerId ??
+      (await findOrCreatePatient(
+        args.subjectName.trim(),
+        args.subjectId?.trim() ?? "",
+      ));
     const obsRef = doc(collection(db, "observations"));
     const primaryIndex = args.primaryIndex ?? 0;
     const images: MediaRef[] = [];
@@ -985,12 +1116,13 @@ export const api = {
 
   async updateObservation(args: UpdateObservationArgs): Promise<{ ok: true }> {
     const { ref, data } = await getObservationDoc(args.id);
-    let patientId = data.patientId;
+    let patientId = args.customerId ?? data.patientId;
     const patient = await loadPatient(patientId);
     if (
-      !patient ||
+      !args.customerId &&
+      (!patient ||
       patient.displayName !== args.subjectName.trim() ||
-      (patient.patientCode ?? "") !== (args.subjectId?.trim() ?? "")
+      (patient.patientCode ?? "") !== (args.subjectId?.trim() ?? ""))
     ) {
       patientId = await findOrCreatePatient(
         args.subjectName.trim(),

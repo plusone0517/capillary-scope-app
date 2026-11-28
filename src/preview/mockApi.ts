@@ -2,8 +2,16 @@
 // 本番ビルドには含まれない。ログインや Firebase なしで全画面を開き、
 // 見た目と流れを確かめるために使う（npm run preview:ui）。
 // サンプルの対象者・画像はすべて架空のもの。
-import type { api as RealApi, ObservationRecord, ImageInput } from "../api";
+import type { api as RealApi, ObservationRecord, ObservationListItem, ImageInput } from "../api";
 import { normalizeConsent, UNCONFIRMED_CONSENT } from "../consent";
+import {
+  findDuplicate,
+  matchesCustomer,
+  normalizeMemberNumber,
+  validateCustomerInput,
+  type CustomerInput,
+  type CustomerRecord,
+} from "../customer";
 
 export type * from "../api";
 
@@ -37,7 +45,27 @@ const daysAgo = (d: number, h = 10) => {
   return t.toISOString();
 };
 
+/** 架空の顧客。山田 花子さんは同姓同名が2人いる（区別の確認用）。 */
+const customers: CustomerRecord[] = [
+  { id: "p-1", displayName: "山田 花子", nameKana: "やまだ はなこ", birthDate: "1975-04-12", sex: "female", memberNumber: "RM-10000001", localCode: null, note: null },
+  { id: "p-2", displayName: "佐藤 一郎", nameKana: "さとう いちろう", birthDate: "1968-09-03", sex: "male", memberNumber: null, localCode: "A-0012", note: null },
+  { id: "p-3", displayName: "鈴木 美咲", nameKana: "すずき みさき", birthDate: "1982-01-25", sex: "female", memberNumber: "RM-10000003", localCode: null, note: null },
+  { id: "p-4", displayName: "山田 花子", nameKana: "やまだ はなこ", birthDate: "1990-07-30", sex: "female", memberNumber: "RM-10000004", localCode: null, note: null },
+];
+const customerOf = (patientId: string) => customers.find((c) => c.id === patientId) ?? null;
+
 function record(over: Partial<ObservationRecord> & { id: string }): ObservationRecord {
+  const base = recordBase(over);
+  const c = customerOf(base.patientId);
+  return {
+    ...base,
+    subjectName: c?.displayName ?? base.subjectName,
+    subjectId: c?.localCode ?? base.subjectId,
+    customer: c,
+  };
+}
+
+function recordBase(over: Partial<ObservationRecord> & { id: string }): ObservationRecord {
   return {
     patientId: "p-1",
     reportId: null,
@@ -75,6 +103,7 @@ function record(over: Partial<ObservationRecord> & { id: string }): ObservationR
     trialGroup: null,
     interventions: [],
     consent: { ...UNCONFIRMED_CONSENT },
+    customer: null,
     ...over,
   };
 }
@@ -148,6 +177,43 @@ const find = (id: string) => {
 const wait = (ms = 150) => new Promise((r) => setTimeout(r, ms));
 const hasFlag = (o: ObservationRecord) =>
   o.flagGiant || o.flagHemorrhage || o.flagLoss || o.flagRamified;
+const toItem = (o: ObservationRecord): ObservationListItem => ({
+  id: o.id,
+  patientId: o.patientId,
+  memberNumber: customerOf(o.patientId)?.memberNumber ?? null,
+  subjectName: o.subjectName,
+  subjectId: o.subjectId,
+  observedAt: o.observedAt,
+  finger: o.finger,
+  status: o.status,
+  hasClinicalFlag: hasFlag(o),
+  patternCount: o.patterns.length,
+  densityPerMm: o.densityPerMm,
+  patternCodes: o.patterns,
+  primaryImageUrl: (o.images.find((i) => i.isPrimary) ?? o.images[0])?.url ?? null,
+  hasVideo: Boolean(o.video),
+  flowSpeedMmPerSec: o.flowSpeedMmPerSec,
+  trialName: o.trialName,
+});
+function assertSavable(input: CustomerInput, ignoreId?: string) {
+  const invalid = validateCustomerInput(input);
+  if (invalid) throw new Error(invalid);
+  const dup = findDuplicate(input, customers, ignoreId);
+  if (dup?.kind === "memberNumber")
+    throw new Error(`この会員番号は「${dup.customer.displayName}」さんで登録済みです。一覧から選んでください。`);
+  if (dup?.kind === "nameAndBirth")
+    throw new Error(`同じお名前・生年月日の方（${dup.customer.displayName}さん）が登録済みです。一覧から選んでください。`);
+}
+const fromInput = (id: string, input: CustomerInput): CustomerRecord => ({
+  id,
+  displayName: input.displayName.trim(),
+  nameKana: input.nameKana?.trim() || null,
+  birthDate: input.birthDate || null,
+  sex: input.sex ?? null,
+  memberNumber: normalizeMemberNumber(input.memberNumber),
+  localCode: input.localCode?.trim() || null,
+  note: input.note?.trim() || null,
+});
 
 export const api: typeof RealApi = {
   async listObservations(args) {
@@ -155,25 +221,48 @@ export const api: typeof RealApi = {
     const search = args.search?.trim() ?? "";
     const rows = [...store]
       .sort((a, b) => b.observedAt.localeCompare(a.observedAt))
-      .filter((o) => !search || o.subjectName.includes(search) || (o.subjectId ?? "").includes(search));
+      .filter((o) => {
+        const c = customerOf(o.patientId);
+        return !search || (c ? matchesCustomer(c, search) : o.subjectName.includes(search));
+      });
+    return { observations: rows.slice(0, args.limit ?? 100).map(toItem) };
+  },
+  async listCustomers(args) {
+    await wait();
     return {
-      observations: rows.slice(0, args.limit ?? 100).map((o) => ({
-        id: o.id,
-        subjectName: o.subjectName,
-        subjectId: o.subjectId,
-        observedAt: o.observedAt,
-        finger: o.finger,
-        status: o.status,
-        hasClinicalFlag: hasFlag(o),
-        patternCount: o.patterns.length,
-        densityPerMm: o.densityPerMm,
-        patternCodes: o.patterns,
-        primaryImageUrl: (o.images.find((i) => i.isPrimary) ?? o.images[0])?.url ?? null,
-        hasVideo: Boolean(o.video),
-        flowSpeedMmPerSec: o.flowSpeedMmPerSec,
-        trialName: o.trialName,
-      })),
+      customers: customers
+        .filter((c) => matchesCustomer(c, args.search ?? ""))
+        .sort((x, y) => (x.nameKana ?? x.displayName).localeCompare(y.nameKana ?? y.displayName, "ja")),
     };
+  },
+  async getCustomer(args) {
+    await wait();
+    return {
+      customer: customerOf(args.id),
+      observations: store
+        .filter((o) => o.patientId === args.id)
+        .sort((a, b) => b.observedAt.localeCompare(a.observedAt))
+        .map(toItem),
+    };
+  },
+  async createCustomer(args) {
+    await wait(300);
+    assertSavable(args);
+    const id = `p-${Date.now()}`;
+    customers.push(fromInput(id, args));
+    return { id };
+  },
+  async updateCustomer(args) {
+    await wait(300);
+    assertSavable(args, args.id);
+    const i = customers.findIndex((c) => c.id === args.id);
+    if (i >= 0) customers[i] = fromInput(args.id, args);
+    for (const o of store.filter((x) => x.patientId === args.id)) {
+      o.customer = customers[i];
+      o.subjectName = customers[i].displayName;
+      o.subjectId = customers[i].localCode;
+    }
+    return { ok: true };
   },
   async getObservation(args) {
     await wait();
@@ -193,13 +282,10 @@ export const api: typeof RealApi = {
   async createObservation(args) {
     await wait(400);
     const id = nextId();
-    const same = store.find(
-      (o) => o.subjectName === args.subjectName && (o.subjectId ?? "") === (args.subjectId ?? ""),
-    );
     store.push(
       record({
         id,
-        patientId: same?.patientId ?? `p-${id}`,
+        patientId: args.customerId ?? `p-${id}`,
         subjectName: args.subjectName,
         subjectId: args.subjectId ?? null,
         observedAt: args.observedAt,

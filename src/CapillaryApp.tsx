@@ -3,6 +3,8 @@
 // 対応環境は Windows PC（Chrome/Edge）と iPad（Safari）。
 
 import { useEffect, useRef, useState } from "react";
+import { CustomerDetailScreen, CustomerListScreen } from "./CustomerScreens";
+import { usePreselectedCustomer } from "./CustomerPicker";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   api,
@@ -50,7 +52,9 @@ type ClinicalFlagKey,
 
 type View =
   | { kind: "list" }
-  | { kind: "new" }
+  | { kind: "customers" }
+  | { kind: "customer"; id: string }
+  | { kind: "new"; customerId?: string }
   | { kind: "report"; id: string }
   | { kind: "edit"; id: string }
   | { kind: "measure"; id: string }
@@ -165,6 +169,16 @@ function AppNav({
             className={itemClass(view.kind === "list")}
           >
             一覧
+          </button>
+          <button
+            type="button"
+            aria-current={
+              view.kind === "customers" || view.kind === "customer" ? "page" : undefined
+            }
+            onClick={() => go({ kind: "customers" })}
+            className={itemClass(view.kind === "customers" || view.kind === "customer")}
+          >
+            顧客
           </button>
           <button
             type="button"
@@ -332,6 +346,7 @@ function findingsToPayload(f: FindingsState) {
     return Number.isFinite(n) ? n : undefined;
   };
   return {
+    customerId: f.customer?.id,
     subjectName: f.subjectName.trim(),
     subjectId: f.subjectId.trim() ? f.subjectId.trim() : undefined,
     observedAt: new Date(f.observedAtLocal).toISOString(),
@@ -592,9 +607,14 @@ function ListScreen({
                 <span className="flex min-w-0 flex-col gap-1">
                   <span className="text-xl font-bold text-[var(--text)]">
                     {obs.subjectName}
+                    {obs.memberNumber && (
+                      <span className="ml-2 text-base font-normal text-[var(--dim)]">
+                        会員番号 {obs.memberNumber}
+                      </span>
+                    )}
                     {obs.subjectId && (
                       <span className="ml-2 text-base font-normal text-[var(--dim)]">
-                        ID：{obs.subjectId}
+                        施設内番号 {obs.subjectId}
                       </span>
                     )}
                   </span>
@@ -685,9 +705,23 @@ function ListScreen({
 /* ================= 新しい観察 ================= */
 
 /** 研究用モードの「新しい観察」。従来の詳細フォームをそのまま使う。 */
-function NewScreen({ go }: { go: (v: View) => void }) {
+function NewScreen({
+  go,
+  customerId,
+}: {
+  go: (v: View) => void;
+  customerId?: string;
+}) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<FindingsState>(() => emptyFindings(nowLocalInput()));
+  usePreselectedCustomer(customerId, (customer) =>
+    setForm((f) => ({
+      ...f,
+      customer,
+      subjectName: customer.displayName,
+      subjectId: customer.localCode ?? "",
+    })),
+  );
   const [images, setImages] = useState<CapturedImage[]>([]);
   const [primaryIndex, setPrimaryIndex] = useState(0);
   const [video, setVideo] = useState<CapturedVideo | null>(null);
@@ -765,8 +799,8 @@ function NewScreen({ go }: { go: (v: View) => void }) {
   });
 
   const handleSave = () => {
-    if (!form.subjectName.trim()) {
-      setError("対象者名を入力してください。");
+    if (!form.customer) {
+      setError("顧客を選んでください。");
       return;
     }
     if (!form.observedAtLocal || Number.isNaN(new Date(form.observedAtLocal).getTime())) {
@@ -1122,6 +1156,7 @@ function EditScreen({
     if (obs && initializedFor.current !== obs.id) {
       initializedFor.current = obs.id;
       setForm({
+        customer: obs.customer,
         subjectName: obs.subjectName,
         subjectId: obs.subjectId ?? "",
         observedAtLocal: isoToLocalInput(obs.observedAt),
@@ -1269,8 +1304,8 @@ function EditScreen({
     );
 
   const handleSave = () => {
-    if (!form.subjectName.trim()) {
-      setError("対象者名を入力してください。");
+    if (!form.customer) {
+      setError("顧客を選んでください。");
       return;
     }
     if (!form.observedAtLocal || Number.isNaN(new Date(form.observedAtLocal).getTime())) {
@@ -1593,10 +1628,12 @@ export function CapillaryApp() {
         {view.kind === "list" && <ListScreen go={go} mode={mode} />}
         {view.kind === "new" &&
           (mode === "simple" ? (
-            <SimpleNewScreen go={go} />
+            <SimpleNewScreen go={go} customerId={view.customerId} />
           ) : (
-            <NewScreen go={go} />
+            <NewScreen go={go} customerId={view.customerId} />
           ))}
+        {view.kind === "customers" && <CustomerListScreen go={go} />}
+        {view.kind === "customer" && <CustomerDetailScreen id={view.id} go={go} />}
         {view.kind === "report" && (
           <ReportScreen id={view.id} go={go} mode={mode} />
         )}

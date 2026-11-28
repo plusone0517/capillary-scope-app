@@ -218,7 +218,8 @@ export function ReportBody({
           <div className="min-w-0 flex-1">
             <h1 className="r-title">毛細血管観察レポート</h1>
             <p className="r-meta mt-1">
-              観察日：{formatDateTime(obs.observedAt)}　対象：{obs.subjectName}
+              観察日：{formatDateTime(obs.observedAt)}　対象：{obs.subjectName} 様
+              {obs.customer?.memberNumber && `　会員番号：${obs.customer.memberNumber}`}
               {obs.subjectId ? `（ID：${obs.subjectId}）` : ""}
             </p>
           </div>

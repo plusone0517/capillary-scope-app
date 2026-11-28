@@ -2,6 +2,8 @@
 // 新規作成と編集で共用する。値の保持は親コンポーネント側。
 
 import { useEffect, useState } from "react";
+import { CustomerPicker } from "./CustomerPicker";
+import type { CustomerRecord } from "./customer";
 import { ConsentFields } from "./ConsentFields";
 import { UNCONFIRMED_CONSENT, type ConsentState } from "./consent";
 import {
@@ -41,6 +43,8 @@ export function emptyIntervention(): InterventionDraft {
 }
 
 export type FindingsState = {
+  /** 選んだ顧客。保存時はこの顧客のIDで記録する（氏名での突き合わせはしない）。 */
+  customer: CustomerRecord | null;
   subjectName: string;
   subjectId: string;
   observedAtLocal: string;
@@ -67,6 +71,7 @@ export type FindingsState = {
 
 export function emptyFindings(observedAtLocal: string): FindingsState {
   return {
+    customer: null,
     subjectName: "",
     subjectId: "",
     observedAtLocal,
@@ -401,26 +406,17 @@ export function FindingsForm({
       <section aria-label="対象者と撮影条件" className="flex flex-col gap-4">
         <h2 className="text-xl font-bold text-[var(--text)]">2. 対象者と撮影条件</h2>
         <div className="grid gap-4 sm:grid-cols-2">
-          <label className={labelClass}>
-            対象者名（必須）
-            <input
-              aria-label="対象者名"
-              className={inputClass}
-              value={value.subjectName}
-              onChange={(e) => set({ subjectName: e.target.value })}
-              placeholder="例：山田 花子"
-            />
-          </label>
-          <label className={labelClass}>
-            対象者ID（任意）
-            <input
-              aria-label="対象者ID"
-              className={inputClass}
-              value={value.subjectId}
-              onChange={(e) => set({ subjectId: e.target.value })}
-              placeholder="例：会員番号など"
-            />
-          </label>
+          <CustomerPicker
+            className="sm:col-span-2"
+            value={value.customer}
+            onChange={(customer) =>
+              set({
+                customer,
+                subjectName: customer?.displayName ?? "",
+                subjectId: customer?.localCode ?? "",
+              })
+            }
+          />
           <label className={labelClass}>
             観察日時
             <input
