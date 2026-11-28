@@ -369,6 +369,7 @@ export function SimpleNewScreen({ go }: { go: SimpleGo }) {
               onChange={setConsent}
               idPrefix="simple-consent"
               className="mt-2"
+              compact
             />
           </section>
           <CaptureIntro support={cap.support} className="order-2" />

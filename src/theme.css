@@ -28,7 +28,7 @@
 }
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --bg: #f4f7f8;
   --surface: #ffffff;
   --paper: #e8eff1;
@@ -54,27 +54,9 @@
   --space-accent: var(--accent);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0a1b23;
-    --surface: #132a34;
-    --paper: #1b3641;
-    --text: #e7eef1;
-    --dim: #9db2be;
-    --border: #2a4552;
-    --border-strong: #3d5f6e;
-    --navy: #0d3b4c;
-    --heading: #dce9ed;
-    --accent: #35a3ad;
-    --accent-strong: #8fd0d6;
-    --accent-bg: #173a44;
-    --ok: #4cc084;
-    --alert: #f0857e;
-    --alert-bg: #3d1d1b;
-    --video-bg: #08141b;
-    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.35), 0 6px 18px -10px rgba(0, 0, 0, 0.5);
-  }
-}
+/* 表示は明るい配色に固定する（2026-11-28）。
+   端末が暗い表示（ダークモード）でも画面を暗くしない。印刷するレポートと
+   画面の見た目をそろえ、検査の場にふさわしい白基調を保つため。 */
 
 /* 院内スタッフ向け：ボタンと入力は指で押しやすい大きさに。 */
 @layer base {
