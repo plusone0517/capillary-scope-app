@@ -53,6 +53,13 @@ import {
 } from "firebase/storage";
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions, storage } from "./firebase";
+import {
+  CONSENT_FORM_VERSION,
+  UNCONFIRMED_CONSENT,
+  normalizeConsent,
+  sameConsent,
+  type ConsentState,
+} from "./consent";
 import type {
   AuditAction,
   GasType,
@@ -146,6 +153,8 @@ export type ObservationRecord = {
   trialName: string | null;
   trialGroup: string | null;
   interventions: InterventionRecord[];
+  /** 同意の記録（旧データは未確認）。 */
+  consent: ConsentState;
 };
 
 export type ObservationListItem = {
@@ -186,6 +195,8 @@ export type TrialExportRow = {
     detail: string;
     timing: string;
   }[];
+  /** 同意の記録（旧データは未確認）。データを使ってよい範囲の確認用。 */
+  consent: ConsentState;
 };
 
 /* ================= 入力の型（試用版 actions の引数と同じ形） ================= */
@@ -269,6 +280,11 @@ export type ObservationInput = {
   trialName?: string;
   trialGroup?: string;
   interventions?: InterventionInput[];
+  /**
+   * 同意の記録。省略した更新では、保存済みの同意に触らない
+   * （同意の欄を持たない画面からの更新で「未確認」に戻さないため）。
+   */
+  consent?: ConsentState;
 };
 
 export type CreateObservationArgs = ObservationInput & {
@@ -714,6 +730,19 @@ async function toRecord(
     ...flow,
     ...study,
     ...base,
+    consent: normalizeConsent(obs.consent),
+  };
+}
+
+/**
+ * 保存用の同意データ。記録日時と記録者は、内容を新しく記録するときだけ付ける。
+ */
+function consentDocFromState(state: ConsentState): DocumentData {
+  return {
+    ...normalizeConsent(state),
+    formVersion: CONSENT_FORM_VERSION,
+    recordedAt: serverTimestamp(),
+    recordedBy: currentUid(),
   };
 }
 
@@ -934,6 +963,7 @@ export const api = {
       }
       await setDoc(obsRef, {
         ...observationDataFromInput(args, patientId),
+        consent: consentDocFromState(args.consent ?? UNCONFIRMED_CONSENT),
         images,
         videos,
         flowVelocity: null,
@@ -968,7 +998,16 @@ export const api = {
       );
     }
     // 画像・動画・血流速度・状態はこの更新では触らない（試用版と同じ分担）。
-    await updateDoc(ref, observationDataFromInput(args, patientId));
+    const update = observationDataFromInput(args, patientId);
+    // 同意は、欄が渡され、かつ内容が変わったときだけ書き換える
+    // （記録日時・記録者・同意書の版を、内容が同じ再保存で上書きしない）。
+    if (
+      args.consent &&
+      !sameConsent(normalizeConsent(args.consent), normalizeConsent(data.consent))
+    ) {
+      update.consent = consentDocFromState(args.consent);
+    }
+    await updateDoc(ref, update);
     await writeAudit("observation.update", "observation", args.id);
     return { ok: true };
   },
@@ -1247,6 +1286,7 @@ export const api = {
             obs.clinicalFlags?.loss ||
             obs.clinicalFlags?.ramified,
         ),
+        consent: normalizeConsent(obs.consent),
         interventions: study.interventions.map((iv) => ({
           category: iv.category,
           gasType: iv.gasType,

@@ -3,6 +3,7 @@
 // CSV は画面表示と同じ値から組み立て、値は事実の記録のまま出す。
 
 import { useEffect, useState } from "react";
+import { caseScopeLabels, consentAnswerLabels } from "./consent";
 import { useQuery } from "@tanstack/react-query";
 import { api, type TrialExportRow } from "./api";
 import { formatDateTime } from "./ReportView";
@@ -40,6 +41,9 @@ function buildCsv(trialName: string, rows: ExportRow[]): string {
     "形のパターン",
     "臨床フラグ",
     "実施内容（タイミング）",
+    "事例紹介への同意",
+    "紹介してよい範囲",
+    "将来の研究利用への同意",
   ];
   const lines = rows.map((row) => {
     const cells = [
@@ -61,6 +65,9 @@ function buildCsv(trialName: string, rows: ExportRow[]): string {
             `${interventionLine(iv)}（${interventionTimingLabels[iv.timing] ?? iv.timing}）`,
         )
         .join("／"),
+      consentAnswerLabels[row.consent.caseUse],
+      row.consent.caseScope ? caseScopeLabels[row.consent.caseScope] : "",
+      consentAnswerLabels[row.consent.futureResearch],
     ];
     return cells.map(csvEscape).join(",");
   });

@@ -110,6 +110,24 @@ export interface StudyInfo {
   interventions: Intervention[];
 }
 
+/**
+ * 同意の記録（観察1件ごと）。判定と表示は src/consent.ts を使うこと。
+ * 旧データには存在しない。存在しない場合は「未確認」として扱う。
+ */
+export interface ObservationConsent {
+  /** 事例（ケーススタディ）として紹介することへの同意。 */
+  caseUse: "granted" | "declined" | "unconfirmed";
+  /** 紹介してよい範囲。caseUse が granted のときだけ値を持つ。 */
+  caseScope: "internal" | "anonymous" | null;
+  /** 将来、研究に利用することへの同意。 */
+  futureResearch: "granted" | "declined" | "unconfirmed";
+  /** 同意書の版（どの文面への同意か）。 */
+  formVersion: string;
+  /** この同意内容を記録した日時とスタッフ。内容が変わったときだけ更新する。 */
+  recordedAt: Timestamp;
+  recordedBy: string; // staff uid
+}
+
 export type ObservationStatus = "draft" | "finalized";
 
 export interface Observation {
@@ -146,6 +164,8 @@ export interface Observation {
   flowVelocity: FlowVelocity | null;
   /** 研究用（試験記録）の情報。通常観察は null。 */
   study: StudyInfo | null;
+  /** 同意の記録。旧データには存在しない（未確認として扱う）。 */
+  consent?: ObservationConsent | null;
   status: ObservationStatus;
   createdBy: string; // staff uid
   createdAt: Timestamp;

@@ -11,6 +11,8 @@
 // スタッフは外す／足すことができるが、基本はAIの結果で進む。
 
 import { useEffect, useRef, useState } from "react";
+import { ConsentFields } from "./ConsentFields";
+import { UNCONFIRMED_CONSENT, type ConsentState } from "./consent";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, describeFirebaseError, type AiPatternCandidate } from "./api";
 import {
@@ -76,6 +78,7 @@ function flagsFromPatterns(patterns: string[]) {
 export function SimpleNewScreen({ go }: { go: SimpleGo }) {
   const queryClient = useQueryClient();
   const [subjectName, setSubjectName] = useState("");
+  const [consent, setConsent] = useState<ConsentState>(UNCONFIRMED_CONSENT);
   const [images, setImages] = useState<CapturedImage[]>([]);
   const [primaryIndex, setPrimaryIndex] = useState(0);
   const [video, setVideo] = useState<CapturedVideo | null>(null);
@@ -236,6 +239,7 @@ export function SimpleNewScreen({ go }: { go: SimpleGo }) {
         // 一般検査では標準の指（左手・薬指）で記録する。
         finger: "left_ring",
         restrictionsOk: false,
+        consent,
         ...flagsFromPatterns(selectedPatterns),
         patterns: selectedPatterns,
         referralGiven: false,
@@ -360,6 +364,12 @@ export function SimpleNewScreen({ go }: { go: SimpleGo }) {
             <p className="text-base text-[var(--dim)]">
               日時は自動で記録されます。撮影する指は標準（左手・薬指）として記録します。条件や所見の細かい入力は、研究用モードで行えます。
             </p>
+            <ConsentFields
+              value={consent}
+              onChange={setConsent}
+              idPrefix="simple-consent"
+              className="mt-2"
+            />
           </section>
           <CaptureIntro support={cap.support} className="order-2" />
           <CaptureControls cap={cap} className="order-4" />

@@ -2,6 +2,8 @@
 // 新規作成と編集で共用する。値の保持は親コンポーネント側。
 
 import { useEffect, useState } from "react";
+import { ConsentFields } from "./ConsentFields";
+import { UNCONFIRMED_CONSENT, type ConsentState } from "./consent";
 import {
 capillaryChangeOptions,
 capillaryClinicalFlagLabels,
@@ -46,6 +48,7 @@ export type FindingsState = {
   roomTempC: string;
   restMinutes: string;
   restrictionsOk: boolean;
+  consent: ConsentState;
   densityPerMm: string;
   flow: string;
   color: string;
@@ -71,6 +74,7 @@ export function emptyFindings(observedAtLocal: string): FindingsState {
     roomTempC: "",
     restMinutes: "",
     restrictionsOk: false,
+    consent: { ...UNCONFIRMED_CONSENT },
     densityPerMm: "",
     flow: "",
     color: "",
@@ -477,6 +481,12 @@ export function FindingsForm({
           動画を撮る場合は、安静時間をおいて指の状態が落ち着いてから撮影してください。血流速度は室温・安静・飲食などの条件で大きく変わるため、静止画と同じ条件でそろえることが大切です。
         </p>
       </section>
+
+      <ConsentFields
+        value={value.consent}
+        onChange={(consent) => set({ consent })}
+        idPrefix="findings-consent"
+      />
 
       <section aria-label="所見" className="flex flex-col gap-5">
         <h2 className="text-xl font-bold text-[var(--text)]">3. 所見</h2>
