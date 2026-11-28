@@ -430,6 +430,10 @@ function ListScreen({
   const [submittedSearch, setSubmittedSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectNote, setSelectNote] = useState<string | null>(null);
+  // お名前と画像は、探したときだけ出す（画面をお客様と一緒に見ることがあるため、
+  // 開いただけで他の方の記録が並ばないようにする）。最近の分を見たいときはボタンで出す。
+  const [showRecent, setShowRecent] = useState(false);
+  const listing = submittedSearch !== "" || showRecent;
   const list = useQuery({
     queryKey: ["observations", submittedSearch],
     queryFn: () =>
@@ -437,9 +441,17 @@ function ListScreen({
         search: submittedSearch ? submittedSearch : undefined,
         limit: 100,
       }),
+    enabled: listing,
   });
+  const closeList = () => {
+    setShowRecent(false);
+    setSubmittedSearch("");
+    setSearch("");
+    setSelectedIds([]);
+    setSelectNote(null);
+  };
 
-  const selectedObs = (list.data?.observations ?? []).filter((o) =>
+  const selectedObs = (listing ? (list.data?.observations ?? []) : []).filter((o) =>
     selectedIds.includes(o.id),
   );
   const [selA, selB] = selectedObs;
@@ -503,9 +515,9 @@ function ListScreen({
           }}
         >
           <input
-            aria-label="対象者名またはIDで検索"
-            className="min-h-16 flex-1 rounded-[var(--radius)] border-2 border-[var(--border-strong)] bg-[var(--surface)] px-4 text-xl text-[var(--text)] shadow-[var(--shadow-card)]"
-            placeholder="対象者名・IDで検索"
+            aria-label="お名前・ふりがな・会員番号で検索"
+            className="min-h-16 min-w-0 flex-1 rounded-[var(--radius)] border-2 border-[var(--border-strong)] bg-[var(--surface)] px-4 text-xl text-[var(--text)] shadow-[var(--shadow-card)]"
+            placeholder="お名前・ふりがな・会員番号で検索"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -518,9 +530,35 @@ function ListScreen({
         </form>
       </div>
 
-      <p className="text-base text-[var(--dim)]">
-        各レポートの「比べる」を2件押すと、ビフォアアフターで比較できます（同じ対象者の2件）。
-      </p>
+      {!listing && (
+        <div className="flex flex-col gap-3 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-card)]">
+          <p className="text-lg leading-relaxed text-[var(--text)]">
+            お名前・ふりがな・会員番号で検索すると、該当する方の観察レポートだけを表示します。
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowRecent(true)}
+            className="min-h-11 self-start rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface)] px-4 text-base text-[var(--text)]"
+          >
+            最近の観察を表示する
+          </button>
+        </div>
+      )}
+
+      {listing && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="min-w-0 flex-1 text-base text-[var(--dim)]">
+            各レポートの「比べる」を2件押すと、ビフォアアフターで比較できます（同じ対象者の2件）。
+          </p>
+          <button
+            type="button"
+            onClick={closeList}
+            className="min-h-11 shrink-0 rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface)] px-4 text-base text-[var(--text)]"
+          >
+            表示を閉じる
+          </button>
+        </div>
+      )}
 
       {selectedObs.length > 0 && (
         <div className="flex flex-col gap-2 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-card)]">
@@ -558,13 +596,13 @@ function ListScreen({
         </div>
       )}
 
-      {list.isPending && <LoadingState />}
-      {list.error && (
+      {listing && list.isLoading && <LoadingState />}
+      {listing && list.error && (
         <p role="alert" className="text-lg text-[var(--alert)]">
           一覧の読み込みに失敗しました。もう一度お試しください。
         </p>
       )}
-      {list.data && list.data.observations.length === 0 && (
+      {listing && list.data && list.data.observations.length === 0 && (
         <div className="flex flex-col items-center gap-4 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-6 py-12 text-center shadow-[var(--shadow-card)]">
           <LogoMark size={56} />
           <p className="max-w-xl text-xl leading-relaxed text-[var(--text)]">
@@ -583,7 +621,7 @@ function ListScreen({
           )}
         </div>
       )}
-      {list.data && list.data.observations.length > 0 && (
+      {listing && list.data && list.data.observations.length > 0 && (
         <ul className="flex flex-col gap-3">
           {list.data.observations.map((obs) => (
             <li
