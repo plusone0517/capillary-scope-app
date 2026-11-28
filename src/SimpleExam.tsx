@@ -12,6 +12,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ConsentFields } from "./ConsentFields";
+import { DensityCountField } from "./DensityCountField";
+import type { DensityMeasurement } from "./densityCount";
 import { CustomerPicker, usePreselectedCustomer } from "./CustomerPicker";
 import type { CustomerRecord } from "./customer";
 import { UNCONFIRMED_CONSENT, type ConsentState } from "./consent";
@@ -89,6 +91,7 @@ export function SimpleNewScreen({
   const [customer, setCustomer] = useState<CustomerRecord | null>(null);
   usePreselectedCustomer(customerId, setCustomer);
   const [consent, setConsent] = useState<ConsentState>(UNCONFIRMED_CONSENT);
+  const [density, setDensity] = useState<DensityMeasurement | null>(null);
   const [images, setImages] = useState<CapturedImage[]>([]);
   const [primaryIndex, setPrimaryIndex] = useState(0);
   const [video, setVideo] = useState<CapturedVideo | null>(null);
@@ -252,6 +255,8 @@ export function SimpleNewScreen({
         finger: "left_ring",
         restrictionsOk: false,
         consent,
+        densityPerMm: density?.densityPerMm,
+        densityMeasurement: density ?? undefined,
         ...flagsFromPatterns(selectedPatterns),
         patterns: selectedPatterns,
         referralGiven: false,
@@ -578,6 +583,15 @@ export function SimpleNewScreen({
                 </div>
               )}
             </div>
+          </section>
+          <section aria-label="本数" className="order-5 flex flex-col gap-3">
+            <h2 className="text-xl font-bold text-[var(--text)]">3. 本数を数える</h2>
+            <DensityCountField
+              imageUrl={images[primaryIndex]?.previewUrl ?? null}
+              value={density}
+              onChange={setDensity}
+              onClear={() => setDensity(null)}
+            />
           </section>
           {error && (
             <p role="alert" className="order-6 text-lg font-medium text-[var(--alert)]">

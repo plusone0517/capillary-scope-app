@@ -150,6 +150,11 @@ export interface Observation {
   conditions: ObservationConditions;
   /** 密度（ループ本数/mm）。数えられない場合は null。経時比較の主軸。 */
   densityPerMm: number | null;
+  /**
+   * 密度を画像の上で数えたときの記録（数えた位置・範囲・目盛り合わせの値）。
+   * 形は src/densityCount.ts の DensityMeasurement。手入力の密度や旧データでは無い。
+   */
+  densityMeasurement?: unknown;
   /** 流れの印象コード（good / slow / stagnant）。 */
   flowImpression: string;
   /** 色の印象コード（bright_red / dark_red / pale）。 */

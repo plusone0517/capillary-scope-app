@@ -2,6 +2,8 @@
 // 新規作成と編集で共用する。値の保持は親コンポーネント側。
 
 import { useEffect, useState } from "react";
+import { DensityCountField } from "./DensityCountField";
+import type { DensityMeasurement } from "./densityCount";
 import { CustomerPicker } from "./CustomerPicker";
 import type { CustomerRecord } from "./customer";
 import { ConsentFields } from "./ConsentFields";
@@ -54,6 +56,8 @@ export type FindingsState = {
   restrictionsOk: boolean;
   consent: ConsentState;
   densityPerMm: string;
+  /** 密度を画像の上で数えた記録。手入力で密度を書き換えたら null にする。 */
+  densityMeasurement: DensityMeasurement | null;
   flow: string;
   color: string;
   flags: Record<ClinicalFlagKey, boolean>;
@@ -81,6 +85,7 @@ export function emptyFindings(observedAtLocal: string): FindingsState {
     restrictionsOk: false,
     consent: { ...UNCONFIRMED_CONSENT },
     densityPerMm: "",
+    densityMeasurement: null,
     flow: "",
     color: "",
     flags: { giant: false, hemorrhage: false, loss: false, ramified: false },
@@ -493,10 +498,18 @@ export function FindingsForm({
             inputMode="decimal"
             className={inputClass}
             value={value.densityPerMm}
-            onChange={(e) => set({ densityPerMm: e.target.value })}
+            onChange={(e) => set({ densityPerMm: e.target.value, densityMeasurement: null })}
             placeholder="例：8.5"
           />
         </label>
+        <DensityCountField
+          imageUrl={measureImageUrl}
+          value={value.densityMeasurement}
+          onChange={(m) =>
+            set({ densityMeasurement: m, densityPerMm: String(m.densityPerMm) })
+          }
+          onClear={() => set({ densityMeasurement: null, densityPerMm: "" })}
+        />
         <AutoMeasurePanel
           imageUrl={measureImageUrl}
           savedCalibrationUmPerPx={calibrationUmPerPx}

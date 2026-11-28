@@ -7,6 +7,7 @@ import { customerSexLabels, customerSubLabel, ageOn, type CustomerRecord } from 
 import { capillaryFingerLabels, capillaryPatternByCode } from "./patterns";
 import { formatDateTime } from "./ReportView";
 import { LoadingState } from "./States";
+import { TrendChart } from "./TrendChart";
 
 function ErrorState({ message }: { message: string }) {
   return (
@@ -174,18 +175,25 @@ function CustomerInfo({ customer }: { customer: CustomerRecord }) {
 function HistoryRow({
   obs,
   onOpen,
+  selected,
+  onToggleCompare,
+  compareDisabled,
 }: {
   obs: ObservationListItem;
   onOpen: () => void;
+  selected: boolean;
+  onToggleCompare: () => void;
+  /** すでに2件選んでいて、これ以上選べない。 */
+  compareDisabled: boolean;
 }) {
   const names = patternNames(obs.patternCodes);
   return (
-    <li>
+    <li className={`${cardClass} flex overflow-hidden ${selected ? "border-2 border-[var(--accent)]" : ""}`}>
       <button
         type="button"
         onClick={onOpen}
         aria-label={`${formatDateTime(obs.observedAt)} のレポートを開く`}
-        className={`${cardClass} flex w-full items-center gap-4 p-3 text-left hover:bg-[var(--paper)]`}
+        className="flex min-w-0 flex-1 items-center gap-4 p-3 text-left hover:bg-[var(--paper)]"
       >
         {obs.primaryImageUrl ? (
           <img src={obs.primaryImageUrl} alt="" className="h-16 w-20 shrink-0 rounded object-cover" />
@@ -224,6 +232,18 @@ function HistoryRow({
           </span>
         </span>
       </button>
+      <button
+        type="button"
+        onClick={onToggleCompare}
+        disabled={compareDisabled && !selected}
+        aria-pressed={selected}
+        aria-label={`${formatDateTime(obs.observedAt)} を比較に選ぶ`}
+        className={`w-24 shrink-0 border-l border-[var(--border)] text-base font-bold disabled:text-[var(--dim)] ${
+          selected ? "bg-[var(--accent)] text-white" : "bg-[var(--surface)] text-[var(--accent-strong)]"
+        }`}
+      >
+        {selected ? "選択中" : "比べる"}
+      </button>
     </li>
   );
 }
@@ -231,6 +251,7 @@ function HistoryRow({
 export function CustomerDetailScreen({ id, go }: { id: string; go: Go }) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
   const detail = useQuery({
     queryKey: ["customer", id],
     queryFn: () => api.getCustomer({ id }),
@@ -258,8 +279,19 @@ export function CustomerDetailScreen({ id, go }: { id: string; go: Go }) {
       </div>
     );
   const observations = detail.data?.observations ?? [];
-  // 直近2回（新しい順に並んでいる）。古い方がビフォア。
-  const latestTwo = observations.length >= 2 ? [observations[1], observations[0]] : null;
+  // 観察は新しい順に並んでいる。比較は古い方をビフォアにする。
+  const compare = (a: ObservationListItem, b: ObservationListItem) => {
+    const [before, after] = a.observedAt <= b.observedAt ? [a, b] : [b, a];
+    go({ kind: "compare", beforeId: before.id, afterId: after.id });
+  };
+  const latest = observations[0];
+  const previous = observations[1];
+  const first = observations[observations.length - 1];
+  const pickedObs = picked
+    .map((pid) => observations.find((o) => o.id === pid))
+    .filter((o): o is ObservationListItem => Boolean(o));
+  const togglePick = (oid: string) =>
+    setPicked((cur) => (cur.includes(oid) ? cur.filter((x) => x !== oid) : cur.length < 2 ? [...cur, oid] : cur));
 
   return (
     <div className="flex flex-col gap-6">
@@ -295,38 +327,62 @@ export function CustomerDetailScreen({ id, go }: { id: string; go: Go }) {
         )}
       </section>
 
+      <section aria-label="本数の推移" className={`${cardClass} flex flex-col gap-3 p-5`}>
+        <h2 className="text-xl font-bold text-[var(--heading)]">本数の推移</h2>
+        <TrendChart
+          rows={observations.map((o) => ({ id: o.id, observedAt: o.observedAt, value: o.densityPerMm }))}
+          onOpen={(oid) => go({ kind: "report", id: oid })}
+        />
+      </section>
+
       <section aria-label="これまでの観察" className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-xl font-bold text-[var(--heading)]">
             これまでの観察（{observations.length}回）
           </h2>
-          <div className="flex flex-wrap gap-3">
-            {latestTwo && (
-              <button
-                type="button"
-                className={secondaryButton}
-                onClick={() =>
-                  go({ kind: "compare", beforeId: latestTwo[0].id, afterId: latestTwo[1].id })
-                }
-              >
-                直近2回を比べる
+          <button
+            type="button"
+            className={primaryButton}
+            onClick={() => go({ kind: "new", customerId: customer.id })}
+          >
+            この方の新しい観察
+          </button>
+        </div>
+        {observations.length >= 2 && (
+          <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius)] bg-[var(--paper)] p-3">
+            <span className="text-base font-bold text-[var(--text)]">ビフォーアフター</span>
+            <button type="button" className={secondaryButton} onClick={() => compare(previous, latest)}>
+              前回と最新
+            </button>
+            {observations.length >= 3 && (
+              <button type="button" className={secondaryButton} onClick={() => compare(first, latest)}>
+                初回と最新
               </button>
             )}
             <button
               type="button"
               className={primaryButton}
-              onClick={() => go({ kind: "new", customerId: customer.id })}
+              disabled={pickedObs.length !== 2}
+              onClick={() => pickedObs.length === 2 && compare(pickedObs[0], pickedObs[1])}
+              style={pickedObs.length !== 2 ? { opacity: 0.5 } : undefined}
             >
-              この方の新しい観察
+              選んだ2回を比べる（{pickedObs.length}/2）
             </button>
           </div>
-        </div>
+        )}
         {observations.length === 0 ? (
           <p className={`${cardClass} p-5 text-lg text-[var(--dim)]`}>まだ観察の記録がありません。</p>
         ) : (
           <ul className="flex flex-col gap-2">
             {observations.map((obs) => (
-              <HistoryRow key={obs.id} obs={obs} onOpen={() => go({ kind: "report", id: obs.id })} />
+              <HistoryRow
+                key={obs.id}
+                obs={obs}
+                onOpen={() => go({ kind: "report", id: obs.id })}
+                selected={picked.includes(obs.id)}
+                onToggleCompare={() => togglePick(obs.id)}
+                compareDisabled={picked.length >= 2}
+              />
             ))}
           </ul>
         )}

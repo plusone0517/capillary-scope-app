@@ -53,6 +53,7 @@ import {
 } from "firebase/storage";
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions, storage } from "./firebase";
+import { normalizeMeasurement, type DensityMeasurement } from "./densityCount";
 import {
   findDuplicate,
   matchesCustomer,
@@ -163,6 +164,8 @@ export type ObservationRecord = {
   interventions: InterventionRecord[];
   /** 同意の記録（旧データは未確認）。 */
   consent: ConsentState;
+  /** 密度を画像の上で数えた記録（無ければ null）。 */
+  densityMeasurement: DensityMeasurement | null;
   /** この観察の顧客（会員番号・生年月日など）。顧客が読めない場合は null。 */
   customer: CustomerRecord | null;
 };
@@ -284,6 +287,11 @@ export type ObservationInput = {
   restMinutes?: number;
   restrictionsOk: boolean;
   densityPerMm?: number;
+  /**
+   * 密度を画像の上で数えた記録。省略した更新では保存済みの記録に触らない。
+   * null を渡すと記録を消す（密度を手入力に直したとき）。
+   */
+  densityMeasurement?: DensityMeasurement | null;
   flow?: string;
   color?: string;
   flagGiant: boolean;
@@ -796,6 +804,7 @@ async function toRecord(
     ...study,
     ...base,
     consent: normalizeConsent(obs.consent),
+    densityMeasurement: normalizeMeasurement(obs.densityMeasurement),
     customer: patient ? toCustomer(obs.patientId, patient) : null,
   };
 }
@@ -827,6 +836,9 @@ function observationDataFromInput(
       restrictionsOk: input.restrictionsOk,
     },
     densityPerMm: input.densityPerMm ?? null,
+    ...(input.densityMeasurement !== undefined
+      ? { densityMeasurement: input.densityMeasurement }
+      : {}),
     flowImpression: input.flow ?? "",
     colorImpression: input.color ?? "",
     patterns: input.patterns,

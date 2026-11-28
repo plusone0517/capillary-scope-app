@@ -103,6 +103,7 @@ function recordBase(over: Partial<ObservationRecord> & { id: string }): Observat
     trialGroup: null,
     interventions: [],
     consent: { ...UNCONFIRMED_CONSENT },
+    densityMeasurement: null,
     customer: null,
     ...over,
   };
@@ -143,6 +144,29 @@ const store: ObservationRecord[] = [
     finalizedAt: daysAgo(92),
     images: [{ id: "obs-3/img-1", url: sampleImage(1), isPrimary: true }],
     consent: normalizeConsent({ caseUse: "granted", caseScope: "internal", futureResearch: "unconfirmed" }),
+  }),
+  record({
+    id: "obs-6",
+    observedAt: daysAgo(185),
+    roomTempC: 23,
+    restMinutes: 15,
+    restrictionsOk: true,
+    densityPerMm: 7,
+    patterns: ["tortuous"],
+    status: "finalized",
+    reportId: "rep-6",
+    finalizedAt: daysAgo(185),
+    images: [{ id: "obs-6/img-1", url: sampleImage(6), isPrimary: true }],
+  }),
+  record({
+    id: "obs-5",
+    observedAt: daysAgo(280),
+    densityPerMm: 6.5,
+    patterns: ["tortuous", "dilated_loop"],
+    status: "finalized",
+    reportId: "rep-5",
+    finalizedAt: daysAgo(280),
+    images: [{ id: "obs-5/img-1", url: sampleImage(7), isPrimary: true }],
   }),
   record({
     id: "obs-2",
@@ -294,6 +318,7 @@ export const api: typeof RealApi = {
         restMinutes: args.restMinutes ?? null,
         restrictionsOk: args.restrictionsOk,
         densityPerMm: args.densityPerMm ?? null,
+        densityMeasurement: args.densityMeasurement ?? null,
         flow: args.flow ?? null,
         color: args.color ?? null,
         flagGiant: args.flagGiant,
@@ -342,6 +367,7 @@ export const api: typeof RealApi = {
       referralGiven: args.referralGiven,
     });
     if (args.consent) o.consent = normalizeConsent(args.consent);
+    if (args.densityMeasurement !== undefined) o.densityMeasurement = args.densityMeasurement;
     return { ok: true };
   },
   async addImage(args) {

@@ -356,6 +356,7 @@ function findingsToPayload(f: FindingsState) {
     restrictionsOk: f.restrictionsOk,
     consent: f.consent,
     densityPerMm: num(f.densityPerMm),
+    densityMeasurement: f.densityMeasurement,
     flow: f.flow ? (f.flow as NonNullable<CreateArgs["flow"]>) : undefined,
     color: f.color ? (f.color as NonNullable<CreateArgs["color"]>) : undefined,
     flagGiant: f.flags.giant,
@@ -1166,6 +1167,7 @@ function EditScreen({
         restrictionsOk: obs.restrictionsOk,
         consent: obs.consent,
         densityPerMm: obs.densityPerMm != null ? String(obs.densityPerMm) : "",
+        densityMeasurement: obs.densityMeasurement,
         flow: obs.flow ?? "",
         color: obs.color ?? "",
         flags: {
