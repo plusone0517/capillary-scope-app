@@ -89,7 +89,58 @@ export function patternDiff(before: Observation, after: Observation): PatternDif
 }
 
 /**
- * 撮影条件の違いの一覧。空なら条件はそろっている（未記録の項目は判定しない）。
+ * 形の比較ができる状態かどうか。
+ * - both: 両回とも形の記録があり、増減を比べられる。
+ * - before_missing: 前回に形の記録がない（今回の形は「新たに見られた形」ではない）。
+ * - after_missing: 今回に形の記録がない。
+ * - none: 両回とも形の記録がない。
+ * 記録のない回との差を「変化」として表示しないために使う。
+ */
+export type PatternBaseline = "both" | "before_missing" | "after_missing" | "none";
+
+export function patternBaseline(before: Observation, after: Observation): PatternBaseline {
+  const hasBefore = before.patterns.length > 0;
+  const hasAfter = after.patterns.length > 0;
+  if (hasBefore && hasAfter) return "both";
+  if (hasAfter) return "before_missing";
+  if (hasBefore) return "after_missing";
+  return "none";
+}
+
+/** 形の名前の一覧（比較できない回の表示用）。 */
+export function patternNamesOf(obs: Observation): string[] {
+  return obs.patterns.map((c) => capillaryPatternByCode[c]?.name ?? c);
+}
+
+/**
+ * 撮影条件のうち、照合できなかった項目の名前。
+ * conditionWarnings は「記録がある項目同士の違い」だけを返すため、
+ * それが空でも条件がそろっているとは限らない。ここが空のときに限り
+ * 「撮影条件がそろっている」と表示してよい。
+ */
+export function unverifiedConditions(before: Observation, after: Observation): string[] {
+  const items: string[] = [];
+  if (before.roomTempC == null || after.roomTempC == null) items.push("室温");
+  if (before.restMinutes == null || after.restMinutes == null) items.push("安静時間");
+  if (!before.restrictionsOk || !after.restrictionsOk) items.push("撮影前の制限の確認");
+  return items;
+}
+
+/** 条件の照合結果を1文にする（違いがない場合の表示用）。 */
+export function conditionSummaryText(before: Observation, after: Observation): string {
+  const sameFinger = before.finger === after.finger;
+  const head = sameFinger
+    ? `同じ指（${fingerLabel(after.finger)}）同士の比較です。`
+    : "";
+  const unverified = unverifiedConditions(before, after);
+  if (unverified.length === 0)
+    return sameFinger ? `${head}撮影条件もそろっています。` : "撮影条件はそろっています。";
+  return `${head}${unverified.join("・")}は記録がそろっていないため、撮影条件の照合は行っていません。`;
+}
+
+/**
+ * 撮影条件の違いの一覧（未記録の項目は判定しない）。
+ * 空でも「そろっている」とは限らない。表示文は conditionSummaryText を使うこと。
  * 撮影の型のルール：条件が違う回の数値は単純比較できない。
  */
 export function conditionWarnings(before: Observation, after: Observation): string[] {

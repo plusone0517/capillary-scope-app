@@ -19,6 +19,7 @@ import { PatternDiagram } from "./PatternDiagram";
 import { LogoMark } from "./Logo";
 import {
 colorLabel,
+conditionSummaryText,
 conditionWarnings,
 fingerLabel,
 flagTextOf,
@@ -26,7 +27,9 @@ flowLabel,
 formatDensity,
 formatSigned,
 formatSpeed,
+patternBaseline,
 patternDiff,
+patternNamesOf,
 primaryImageOf,
 } from "./compare";
 import {
@@ -130,22 +133,28 @@ export function ReportBody({
       label: "色の印象",
       value: `${colorLabel(prev.color)} → ${colorLabel(obs.color)}`,
     });
+    // 形の比較は、両回に形の記録があるときだけ増減として表示する。
+    // 片方に記録がない回との差を「新たに見られた形」と表示しない。
+    const baseline = patternBaseline(prev, obs);
     const shapeParts: string[] = [];
-    if (prevPd.added.length > 0)
-      shapeParts.push(`新たに見られた形：${prevPd.added.join("、")}`);
-    if (prevPd.removed.length > 0)
-      shapeParts.push(`前回のみ見られた形：${prevPd.removed.join("、")}`);
-    // 両回ともパターン未選択なら「同じ形」ではなく「記録なし」とする
-    // （一致した形の欄の「選択されたパターンはありません」と矛盾させない）。
-    const bothNoPatterns = prev.patterns.length === 0 && obs.patterns.length === 0;
+    if (baseline === "both") {
+      if (prevPd.added.length > 0)
+        shapeParts.push(`新たに見られた形：${prevPd.added.join("、")}`);
+      if (prevPd.removed.length > 0)
+        shapeParts.push(`前回のみ見られた形：${prevPd.removed.join("、")}`);
+    }
     compareRows.push({
       label: "形の変化",
       value:
-        shapeParts.length > 0
-          ? shapeParts.join("／")
-          : bothNoPatterns
-            ? "形の記録がありません"
-            : "前回と同じ形でした",
+        baseline === "before_missing"
+          ? `今回の形：${patternNamesOf(obs).join("、")}（前回は形の記録がないため、今回を基準として記録しました）`
+          : baseline === "after_missing"
+            ? `前回の形：${patternNamesOf(prev).join("、")}（今回は形の記録がありません）`
+            : baseline === "none"
+              ? "形の記録がありません"
+              : shapeParts.length > 0
+                ? shapeParts.join("／")
+                : "前回と同じ形でした",
     });
     compareRows.push({
       label: "臨床フラグ",
@@ -363,7 +372,7 @@ export function ReportBody({
               </p>
             ) : (
               <p className="r-small mt-2">
-                同じ指（{fingerLabel(obs.finger)}）同士の比較です。撮影条件もそろっています。
+                {prev ? conditionSummaryText(prev, obs) : null}
               </p>
             )}
             <dl className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2">

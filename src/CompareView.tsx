@@ -10,6 +10,7 @@ import { formatDateTime, isDummySubject } from "./ReportView";
 import { LoadingState } from "./States";
 import {
   colorLabel,
+  conditionSummaryText,
   conditionWarnings,
   fingerLabel,
   flagTextOf,
@@ -17,7 +18,9 @@ import {
   formatDensity,
   formatSigned,
   formatSpeed,
+  patternBaseline,
   patternDiff,
+  patternNamesOf,
   primaryImageOf,
   type Observation,
 } from "./compare";
@@ -170,8 +173,8 @@ export function CompareScreen({
     o1.observedAt <= o2.observedAt ? [o1, o2] : [o2, o1];
 
   const warnings = conditionWarnings(before, after);
-  const sameFinger = before.finger === after.finger;
   const pd = patternDiff(before, after);
+  const baseline = patternBaseline(before, after);
   const bothVideos = Boolean(before.video && after.video);
   const betweenItems = trialMode ? interventionsBetween(before, after) : [];
   const trialName = after.trialName ?? before.trialName;
@@ -278,9 +281,7 @@ export function CompareScreen({
         </div>
       ) : (
         <p className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-card)] text-lg text-[var(--text)]">
-          {sameFinger
-            ? `同じ指（${fingerLabel(after.finger)}）同士の比較です。撮影条件もそろっています。`
-            : "撮影条件はそろっています。"}
+          {conditionSummaryText(before, after)}
         </p>
       )}
 
@@ -386,9 +387,29 @@ export function CompareScreen({
 
       <section aria-label="形のパターンの変化" className="flex flex-col gap-3">
         <h2 className="text-xl font-bold text-[var(--text)]">形のパターンの変化</h2>
-        <PatternChips title="アフターで新たに見られた形" names={pd.added} />
-        <PatternChips title="ビフォアのみで見られた形" names={pd.removed} />
-        <PatternChips title="両方で見られた形" names={pd.kept} />
+        {baseline === "both" ? (
+          <>
+            <PatternChips title="アフターで新たに見られた形" names={pd.added} />
+            <PatternChips title="ビフォアのみで見られた形" names={pd.removed} />
+            <PatternChips title="両方で見られた形" names={pd.kept} />
+          </>
+        ) : baseline === "before_missing" ? (
+          <>
+            <p className="text-base text-[var(--text)]">
+              ビフォアに形の記録がないため、アフターを基準として表示しています。
+            </p>
+            <PatternChips title="アフターで見られた形" names={patternNamesOf(after)} />
+          </>
+        ) : baseline === "after_missing" ? (
+          <>
+            <p className="text-base text-[var(--text)]">
+              アフターに形の記録がないため、ビフォアの形のみ表示しています。
+            </p>
+            <PatternChips title="ビフォアで見られた形" names={patternNamesOf(before)} />
+          </>
+        ) : (
+          <p className="text-base text-[var(--text)]">形の記録がありません。</p>
+        )}
       </section>
     </div>
   );
