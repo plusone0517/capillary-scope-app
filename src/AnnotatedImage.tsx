@@ -52,7 +52,7 @@ type Props = {
   listLabel: string;
 };
 
-/** 番号バッジ／マーカーの色。臨床フラグ系は赤、それ以外はティール。 */
+/** 番号バッジ／マーカーの色。臨床フラグ系は赤、それ以外は操作色（ブルー）。 */
 function markerColorClass(clinical: boolean | undefined): string {
   return clinical ? "bg-[var(--alert)]" : "bg-[var(--accent)]";
 }
@@ -104,14 +104,14 @@ export function AnnotatedImage({ imageUrl, imageAlt, items, listLabel }: Props) 
               {/* 対象部分を囲む輪 */}
               <span
                 aria-hidden="true"
-                className={`block h-full w-full rounded-full border-[3px] bg-white/10 shadow-[0_2px_10px_rgba(13,59,76,0.45)] ${ringColor} ${
+                className={`block h-full w-full rounded-full border-[3px] bg-white/10 shadow-[0_2px_10px_rgba(11,37,69,0.45)] ${ringColor} ${
                   active ? "ring-4 ring-white/80" : ""
                 }`}
               />
               {/* 番号バッジ（輪の右上／左上） */}
               <span
                 aria-hidden="true"
-                className={`absolute -top-2 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white text-sm font-bold text-white shadow-[0_2px_8px_rgba(13,59,76,0.45)] ${markerColorClass(item.clinical)} ${
+                className={`absolute -top-2 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white text-sm font-bold text-white shadow-[0_2px_8px_rgba(11,37,69,0.45)] ${markerColorClass(item.clinical)} ${
                   flip ? "-left-2" : "-right-2"
                 }`}
               >
@@ -121,7 +121,7 @@ export function AnnotatedImage({ imageUrl, imageAlt, items, listLabel }: Props) 
               {item.shortLabel && (
                 <span
                   aria-hidden="true"
-                  className={`absolute -top-2 whitespace-nowrap rounded-full px-2 py-0.5 text-sm font-bold text-white shadow-[0_2px_8px_rgba(13,59,76,0.45)] ${markerColorClass(item.clinical)} ${
+                  className={`absolute -top-2 whitespace-nowrap rounded-full px-2 py-0.5 text-sm font-bold text-white shadow-[0_2px_8px_rgba(11,37,69,0.45)] ${markerColorClass(item.clinical)} ${
                     flip ? "right-full mr-1" : "left-full ml-1"
                   }`}
                 >

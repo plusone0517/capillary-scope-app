@@ -151,7 +151,7 @@ function AppNav({
         : "text-[var(--text)] hover:bg-[var(--paper)]"
     }`;
   return (
-    <div className="sticky top-0 z-50 border-b border-[var(--border)] bg-[var(--surface)]/95 shadow-[0_1px_8px_rgba(13,59,76,0.08)] backdrop-blur">
+    <div className="sticky top-0 z-50 border-b border-[var(--border)] bg-[var(--surface)]/95 shadow-[0_1px_8px_rgba(11,37,69,0.08)] backdrop-blur">
       <div
         className={`mx-auto flex h-14 w-full items-center gap-2 overflow-x-auto px-3 sm:px-6 ${
           wide ? "max-w-[1680px]" : "max-w-6xl"
@@ -228,7 +228,7 @@ function StepNav() {
   return (
     <nav
       aria-label="入力の進み具合"
-      className="sticky top-14 z-40 -mx-4 border-b border-[var(--border)] bg-[var(--bg)]/95 px-4 shadow-[0_8px_16px_-12px_rgba(13,59,76,0.35)] backdrop-blur sm:-mx-6 sm:px-6"
+      className="sticky top-14 z-40 -mx-4 border-b border-[var(--border)] bg-[var(--bg)]/95 px-4 shadow-[0_8px_16px_-12px_rgba(11,37,69,0.35)] backdrop-blur sm:-mx-6 sm:px-6"
     >
       <ol className="flex h-[52px] items-center gap-1 overflow-x-auto sm:gap-2">
         {OBS_STEPS.map((step, i) => {
@@ -839,7 +839,7 @@ function NewScreen({ go }: { go: (v: View) => void }) {
               {error}
             </p>
           )}
-          <div className="sticky bottom-0 z-20 order-6 -mx-4 border-t border-[var(--border)] bg-[var(--bg)]/95 px-4 py-3 shadow-[0_-8px_16px_-12px_rgba(13,59,76,0.35)] backdrop-blur max-lg:shrink-0 sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0 lg:pb-1">
+          <div className="sticky bottom-0 z-20 order-6 -mx-4 border-t border-[var(--border)] bg-[var(--bg)]/95 px-4 py-3 shadow-[0_-8px_16px_-12px_rgba(11,37,69,0.35)] backdrop-blur max-lg:shrink-0 sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0 lg:pb-1">
             <button
               type="button"
               disabled={create.isPending}
@@ -1410,7 +1410,7 @@ function EditScreen({
               {error}
             </p>
           )}
-          <div className="sticky bottom-0 z-20 order-7 -mx-4 border-t border-[var(--border)] bg-[var(--bg)]/95 px-4 py-3 shadow-[0_-8px_16px_-12px_rgba(13,59,76,0.35)] backdrop-blur sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0 lg:pb-1">
+          <div className="sticky bottom-0 z-20 order-7 -mx-4 border-t border-[var(--border)] bg-[var(--bg)]/95 px-4 py-3 shadow-[0_-8px_16px_-12px_rgba(11,37,69,0.35)] backdrop-blur sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0 lg:pb-1">
             <button
               type="button"
               disabled={update.isPending}

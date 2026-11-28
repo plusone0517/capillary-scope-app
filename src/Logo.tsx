@@ -1,6 +1,6 @@
 // 製品ロゴマーク。毛細血管のループ（ヘアピン状に折り返す1本の血管）を
-// 細い線2本で表したもの。外側のループが血管の輪郭（ネイビー #0D3B4C）、
-// 内側の細いループが血の流れ（ティール #12808A）。
+// 細い線2本で表したもの。外側のループが血管の輪郭（ネイビー #0B2545）、
+// 内側の細いループが血の流れ（ブルー #1D5FA8）。
 // 色はテーマの基調2色のみを使い、画面・印刷のどちらでも同じ形で出す。
 export function LogoMark({
   size = 40,
@@ -21,13 +21,13 @@ export function LogoMark({
     >
       <path
         d="M15 43 V21 a9 9 0 0 1 18 0 V43"
-        stroke="#0D3B4C"
+        stroke="#0B2545"
         strokeWidth="4.5"
         strokeLinecap="round"
       />
       <path
         d="M22 43 V22.5 a2 2 0 0 1 4 0 V43"
-        stroke="#12808A"
+        stroke="#1D5FA8"
         strokeWidth="2.5"
         strokeLinecap="round"
       />

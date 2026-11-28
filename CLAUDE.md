@@ -1,6 +1,6 @@
 # 毛細血管 観察・記録システム — 引き継ぎドキュメント
 
-このファイルは、Muse（チャット側）で開発してきた内容を Claude Code へ引き継ぐための正本です。作業前に必ず全文を読んでください。最終更新: 2026-11-28。
+このファイルは、Muse（チャット側）で開発してきた内容を Claude Code へ引き継ぐための正本です。作業前に必ず全文を読んでください。最終更新: 2026-11-28（Claude Code による引き継ぎ後の更新を含む）。
 
 ## プロダクト概要
 
@@ -29,7 +29,8 @@
 
 - フロント: Vite + React + TypeScript。`src/` 直下にフラット配置。TanStack Query 使用。
   - 主要ファイル: `CapillaryApp.tsx`（画面遷移・一覧・研究用フォーム）、`SimpleExam.tsx`（一般検査）、`CapturePanel.tsx`（撮影一式：カメラ選択/調整/AF/全画面撮影、`CaptureMediaDisplay` と `CaptureControls` と `useCapturePanel` を提供）、`camera.ts`、`autoMeasure.ts`（ブラウザ内自動計測の試作）、`aiAnalysis.ts`（複数フレーム集約）、`AnnotatedImage.tsx`（輪＋番号＋ラベルの注釈表示）、`capillaryPatterns.ts`（28種の正本データ）、`patternDiagrams.ts`（模式図SVG）、`theme.css`（色の正本は :root の CSS 変数）。
-  - テーマ: 医療系ネイビー/ティール（基調 #0D3B4C、操作 #12808A、背景 #F4F7F8）。赤 #C1272D は臨床フラグ・破壊的操作・エラー・録画中のみ。
+  - テーマ: ネイビー × ブルー（基調 #0B2545、操作 #1D5FA8、背景 #F5F7FA）。2026-11-28 にユーザーが3案から選定。赤 #C1272D は臨床フラグ・破壊的操作・エラー・録画中のみ。
+  - 表示は明るい配色に固定（ダークモードの自動切り替えは廃止）。端末が暗い表示でも白基調のまま出す。暗い配色を戻さないこと。
   - レイアウト: 観察の新規・編集画面は2カラム（左 minmax(400px,470px) に操作系を集めカラム内スクロール、右に画像全面）。`CapillaryApp.tsx` の `wideView`（new/edit で max-w-[1680px]）。
 - バックエンド: Firebase（Auth / Firestore / Storage / Functions 第2世代 Node.js 22、asia-northeast1）。
 
@@ -63,9 +64,17 @@
   - 注意: gpt-5 / gpt-6 系の推論モデルは Chat Completions で `temperature` を受け付けない。コード側でモデル名を見て `reasoning_effort`（解析=none、下書き=low）に置き換える実装にしてある。新モデルへ変えるときはこの分岐を確認すること。
 - APIキー: Secret Manager の `OPENAI_API_KEY`（ユーザーがコンソールで登録）。**キーの値をチャット・コード・このファイルに書かないこと。** 未設定時は例外にせず `{ configured: false }` を返し、画面は「AI解析はまだ設定されていません」表示になる。
 
-## デプロイ手順（現行・手動）
+## デプロイ手順
 
-GitHub Actions は未成立（後述）。現在は Google Cloud Shell から手動デプロイする。
+### 自動デプロイ（現行）
+
+- **main に push すると GitHub Actions が Hosting を本番に自動デプロイする**（2026-11-28 に成立）。ワークフローは `.github/workflows/firebase-deploy.yml`（WIF 経由、SA `github-deployer@medipro-capillary-scope.iam.gserviceaccount.com`）。
+- 対象は **Hosting のみ**。Firestore のインデックス操作は SA に権限がなく 403 で失敗するため外してある。Firestore ルール・インデックス・Storage ルール・Functions を変えたときは、下の手動手順でデプロイするか、SA に「Cloud Datastore インデックス管理者」を付与してから対象を戻す。
+- 結果の確認: `gh run list --repo plusone0517/capillary-scope-app --limit 3`、失敗時は `gh run view <id> --log-failed`。
+
+### 手動デプロイ（Functions・ルールを変えたとき）
+
+Google Cloud Shell から実行する。
 
 ```bash
 git clone https://github.com/plusone0517/capillary-scope-app.git  # 2回目以降は git pull
@@ -83,12 +92,22 @@ npx -y firebase-tools deploy --only hosting --project medipro-capillary-scope --
 ```
 
 - Functions を変えたとき: `cd functions && npm ci && npm run build && cd ..` してから `--only functions`（または hosting と同時）。
-- Cloud Shell の /home は容量不足（ENOSPC）になりやすい。デプロイが容量で落ちたら `rm -rf node_modules ~/.npm` で空け、dist（Functions のときは functions/lib）が残っていることを確認して、デプロイコマンドだけ再実行すれば通る（毎回この2回目で成功している）。
+- Cloud Shell の /home は容量不足（ENOSPC）になりやすい。デプロイが容量で落ちたら `rm -rf node_modules ~/.npm` で空け、dist（Functions のときは functions/lib）が残っていることを確認して、デプロイコマンドだけ再実行すれば通る。
 
-### GitHub Actions（未成立・直し方）
+## 確認用プレビュー（ログインなしで全画面を開く）
 
-- ワークフロー正本はリポジトリ内 `.github/workflows/firebase-deploy.yml`（WIF 経由、SA `github-deployer@medipro-capillary-scope.iam.gserviceaccount.com`、GCP 側設定は完了済み）。
-- 問題: GitHub 上にファイルが二重パス `.github/workflows/firebase-deploy.yml/firebase-deploy.yml` で置かれてしまった。GitHub の画面/API から二重パスの方を削除し、正しいパスに1ファイルだけ残せば自動デプロイが成立する見込み。なお GitHub App 連携経由では `.github/workflows/` 配下への書き込みが 403 になるため、この修正はユーザーが GitHub の画面から行う必要がある。
+- `npm run preview:ui` → http://localhost:5199/preview.html 。データ層（`src/api.ts`）と認証（`src/auth/AuthGate.tsx`）を `src/preview/` のスタブに差し替え、架空のサンプルデータで全画面を開く。本番ビルドには含まれない。
+- UI を変えたら、ここで実際の画面を開いて（Playwright 等で撮って）確かめてから出すこと。`src/api.ts` の `api` に関数を足したら、`src/preview/mockApi.ts` にも足す（型で検出される）。
+- 注意: `src/styles.css` の `input { width: 100%; min-height: 48px; … }` はレイヤー外の指定で、Tailwind のクラスより強い。チェックボックス・ラジオの大きさはインラインスタイルで固定しないと横に広がる（`ConsentFields.tsx` を参照）。
+- テスト: `npm test`（vitest）。比較ロジック・同意の判定・同意欄の描画テストがある。
+
+## データの位置づけ（2026-11-28 ユーザー決定）
+
+- **現在はケーススタディ（事例の紹介・参考程度）として運用する。** 集計した結果を根拠として外に出すことはしない。
+- **将来は倫理審査を経て、エビデンスとして使えるデータにしていく。** そのため、研究に耐える形（撮影条件・同意・版の記録）で蓄積する設計にする。
+- **同意は2段で、観察1件ごとに記録する**（`src/consent.ts`、`observations.consent`）。1=事例として紹介することへの同意（範囲：施設内のみ／氏名を外して施設外も可）、2=将来の研究利用への同意。未入力・旧データは「未確認」で、事例にも研究候補にも使わない。同意書の版は `CONSENT_FORM_VERSION`（文面は未確定。確定したら版を上げる）。
+- 28種の名前のうち臓器・体質を名乗るもの（肝臓機能の低下 など14種）は、文献で名前どおりの裏づけが確認できていない。断定ではなく「これから確かめる仮説」として扱う方針。名称の変更・統合はユーザーの判断待ち（勝手に変えない）。文献の確認結果は Claude のドキュメント「毛細血管の形と関連報告の一覧」にある。
+- 販売先はクリニックとサロンの両方。ソフトが出すのは形と数値、解釈は人（医師）が書く、という分担で両方の版を設計する。
 
 ## GitHub リポジトリ
 
@@ -115,17 +134,21 @@ npx -y firebase-tools deploy --only hosting --project medipro-capillary-scope --
 
 ## 未決・残作業
 
+UI 刷新の課題（2026-11-28 ユーザー提示）と進める順: ①デザイン（配色は決定・適用済み）→ ②顧客管理（対象者を氏名＋IDだけで特定しており同姓同名が同一人物として混ざる。最優先で直す）→ ③記録とビフォーアフター比較（顧客ごとの経過・本数の推移）→ ④標準化したレポート出力 → ⑤操作性・自動化（撮影時の画質チェック、本数の自動計測）。同意書の文面案も未作成。
+
+以下は引き継ぎ時点からの残作業。
+
 1. ユーザーの実機再確認（一般検査の一連フロー、AF の実機挙動、注釈の分かりやすさ、gpt-6-luna での解析結果）。
 2. 自動計測の抽出品質チューニング。
 3. USB-C iPad（Safari）での通し実機テスト（撮影→所見→保存→確定→QR発行）。
-4. GitHub Actions の二重パス修正（ユーザー作業）、リポジトリの Private 化（ユーザー判断）。
+4. リポジトリの Private 化（ユーザー判断）。GitHub Actions の二重パスは修正済み。
 5. パターンごとのアドバイス文面（下書き→ユーザー確認。サンプル分のみ存在）。
 6. 段階2: ルーツマイル側の QR 取り込み口（未着手。段階1の実機確認後にユーザーのゴーサイン待ち）。設計は pull/claim 方式（QR には reportId＋推測不能・期限付き・1回限りトークン）。
 7. 未決: 取り込み後の院内側原本の保管期間、非会員の来院者の扱い、ルーツ側の取り込みが会員本人前提かどうか。
 
 ## 作業上の約束（ユーザーとの合意）
 
-- 本番反映（main への push・デプロイ）は原則ユーザーの明示承認が出てから。2026-11-28 夕方の一連の修正については「確認待ちなしで公開」の指示あり（その範囲のみ）。
+- 本番反映（main への push＝自動デプロイ）は、**毎回の確認なしで行ってよい**（2026-11-28、ユーザーが「自動でいい」と明示）。ただし下の検証を済ませてから出すこと。反映したら何を出したかを必ず報告する。Private 化・データ削除・ルール変更など元に戻しにくい操作は、これまでどおり事前に確認する。
 - **「直した」と言う前に実フローで検証する。** 過去に助手側の自己評価90点に対しユーザーの実機評価が30点（赤点）だった経緯がある。ユーザーの点数が正。
 - 変更は小さく分け、ビルド（ルート `npm run build`、Functions は `functions/` で `npm run build`）を通してから push する。
 - UI 文言・画面は日本語。エラーは Firebase の英語をそのまま出さず日本語化する（`describeFirebaseError` に統一済み）。

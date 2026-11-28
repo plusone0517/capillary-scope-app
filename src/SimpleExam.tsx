@@ -581,7 +581,7 @@ export function SimpleNewScreen({ go }: { go: SimpleGo }) {
               {error}
             </p>
           )}
-          <div className="sticky bottom-0 z-20 order-7 -mx-4 border-t border-[var(--border)] bg-[var(--bg)]/95 px-4 py-3 shadow-[0_-8px_16px_-12px_rgba(13,59,76,0.35)] backdrop-blur max-lg:shrink-0 sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0 lg:pb-1">
+          <div className="sticky bottom-0 z-20 order-7 -mx-4 border-t border-[var(--border)] bg-[var(--bg)]/95 px-4 py-3 shadow-[0_-8px_16px_-12px_rgba(11,37,69,0.35)] backdrop-blur max-lg:shrink-0 sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0 lg:pb-1">
             <button
               type="button"
               disabled={create.isPending}

@@ -1,6 +1,6 @@
 /* 毛細血管 分析アプリ テーマ。
    検査アプリとしての医療系デザイン：白と薄いグレーを地に、
-   基調はネイビーティール #0D3B4C、操作色はティール #12808A。
+   基調はネイビー #0B2545、操作色はブルー #1D5FA8（2026-11-28 にユーザーが選定）。
    赤 #C1272D は臨床フラグと破壊的操作だけに使う。
    テーマ色はこの :root の CSS 変数で一元管理し、各画面は var() 経由で参照する。 */
 @import "tailwindcss";
@@ -29,23 +29,23 @@
 
 :root {
   color-scheme: light;
-  --bg: #f4f7f8;
+  --bg: #f5f7fa;
   --surface: #ffffff;
-  --paper: #e8eff1;
-  --text: #1c2b33;
-  --dim: #5b7183;
-  --border: #d5dee3;
-  --border-strong: #aec2cb;
-  --navy: #0d3b4c;
-  --heading: #0d3b4c;
-  --accent: #12808a;
-  --accent-strong: #0d3b4c;
-  --accent-bg: #e1eef0;
+  --paper: #eaeff5;
+  --text: #1b2733;
+  --dim: #566779;
+  --border: #d6dde6;
+  --border-strong: #aebbcb;
+  --navy: #0b2545;
+  --heading: #0b2545;
+  --accent: #1d5fa8;
+  --accent-strong: #0b2545;
+  --accent-bg: #e6eef8;
   --ok: #2e9e6b;
   --alert: #c1272d;
   --alert-bg: #faecea;
-  --video-bg: #10222b;
-  --shadow-card: 0 1px 3px rgba(13, 59, 76, 0.06), 0 6px 18px -10px rgba(13, 59, 76, 0.14);
+  --video-bg: #0f1c2e;
+  --shadow-card: 0 1px 3px rgba(11, 37, 69, 0.06), 0 6px 18px -10px rgba(11, 37, 69, 0.16);
   --radius: 12px;
   --space-surface: var(--surface);
   --space-surface-alt: var(--paper);
