@@ -339,245 +339,251 @@ export function SimpleNewScreen({ go }: { go: SimpleGo }) {
         </button>
       </div>
 
-      <section aria-label="対象者" className="flex flex-col gap-2">
-        <label className="flex flex-col gap-1 text-base font-medium text-[var(--text)]">
-          対象者のお名前（必須）
-          <input
-            aria-label="対象者のお名前"
-            className="min-h-16 w-full rounded-[var(--radius)] border-2 border-[var(--border-strong)] bg-[var(--surface)] px-4 text-xl text-[var(--text)]"
-            value={subjectName}
-            onChange={(e) => setSubjectName(e.target.value)}
-            placeholder="例：山田 花子"
-          />
-        </label>
-        <p className="text-base text-[var(--dim)]">
-          日時は自動で記録されます。撮影する指は標準（左手・薬指）として記録します。条件や所見の細かい入力は、研究用モードで行えます。
-        </p>
-      </section>
-
-      <div className="flex flex-col gap-8">
-        <CaptureIntro support={cap.support} />
-        <CaptureMediaDisplay cap={cap} />
-        <CaptureControls cap={cap} />
-        {frameNote && (
-          <p className="rounded-[var(--radius)] bg-[var(--paper)] p-3 text-base leading-relaxed text-[var(--text)]">
-            {frameNote}
-          </p>
-        )}
-      </div>
-
-      <section aria-label="AI解析" className="flex flex-col gap-4">
-        <h2 className="text-xl font-bold text-[var(--text)]">2. AI解析</h2>
-        <p className="text-base leading-relaxed text-[var(--dim)]">
-          動画がある場合は動画から複数のフレームを切り出して解析し、静止画も合わせて結果を集約します。結果は28種の正式名称で示され、そのまま所見の下書きに入ります。
-        </p>
-        <button
-          type="button"
-          disabled={
-            aiPhase === "working" || (images.length === 0 && !video)
-          }
-          onClick={() => void handleAnalyze()}
-          className="min-h-20 w-full rounded-[var(--radius)] bg-[var(--accent)] px-6 text-2xl font-bold text-white shadow-[var(--shadow-card)] disabled:opacity-40"
-        >
-          {aiPhase === "working"
-            ? aiProgress
-              ? `AIが解析しています…（${aiProgress.done}/${aiProgress.total}枚）`
-              : "AIが解析しています…"
-            : "AI解析をする"}
-        </button>
-        {images.length === 0 && !video && (
-          <p className="text-base text-[var(--dim)]">
-            画像も動画もまだないため使えません。撮影するか、ファイルから取り込んでください。
-          </p>
-        )}
-        {aiPhase === "not-configured" && (
-          <p className="text-base text-[var(--text)]">
-            AI解析はまだ設定されていません。
-          </p>
-        )}
-        {aiPhase === "error" && aiNote && (
-          <p role="alert" className="text-base font-medium text-[var(--alert)]">
-            {aiNote}
-          </p>
-        )}
-        {aiPhase === "done" && aiNote && (
-          <p className="text-base text-[var(--dim)]">{aiNote}</p>
-        )}
-        {aiPhase === "done" && aggregated.length === 0 && (
-          <p className="text-lg text-[var(--text)]">
-            AIから候補は提示されませんでした。下の「28種から選び直す」から手で選ぶか、研究用モードで詳しく記録してください。
-          </p>
-        )}
-
-        {aiPhase === "done" && aggregated.length > 0 && (
-          <div className="flex flex-col gap-4">
-            <p className="text-base leading-relaxed text-[var(--text)]">
-              AIの所見です（{aggregated[0]?.totalFrames ?? 0}
-              枚の画像から集約）。上位{MAX_DRAFT_PATTERNS}
-              件を下書きとして選択に入れています。外したり足したりできますが、基本はこの結果で進めます。
-            </p>
-            {representativeUrl && (
-              <AnnotatedImage
-                imageUrl={representativeUrl}
-                imageAlt="AI解析の代表画像（番号マーカーつき）"
-                items={annotationItems}
-                listLabel="AIの所見（番号つき）"
+      {/* lg以上：左＝操作系（カラム内スクロール）、右＝画像画面（全面）。
+          lg未満：ラッパーを display:contents にして縦積み
+          （名前→説明→メディア（上部sticky）→操作→AI→保存）に戻す。
+          高さの差し引きは研究用の新しい観察（21.75rem）から、一般検査には
+          ないステップ表示とその分の gap を引いたもの。 */}
+      <div className="flex flex-col gap-8 lg:grid lg:h-[calc(100dvh-16.44rem)] lg:min-h-[400px] lg:grid-cols-[minmax(400px,470px)_minmax(0,1fr)] lg:gap-6">
+        <div className="contents lg:order-1 lg:flex lg:min-h-0 lg:flex-col lg:gap-8 lg:overflow-y-auto lg:pr-1">
+          <section aria-label="対象者" className="order-1 flex flex-col gap-2">
+            <label className="flex flex-col gap-1 text-base font-medium text-[var(--text)]">
+              対象者のお名前（必須）
+              <input
+                aria-label="対象者のお名前"
+                className="min-h-16 w-full rounded-[var(--radius)] border-2 border-[var(--border-strong)] bg-[var(--surface)] px-4 text-xl text-[var(--text)]"
+                value={subjectName}
+                onChange={(e) => setSubjectName(e.target.value)}
+                placeholder="例：山田 花子"
               />
+            </label>
+            <p className="text-base text-[var(--dim)]">
+              日時は自動で記録されます。撮影する指は標準（左手・薬指）として記録します。条件や所見の細かい入力は、研究用モードで行えます。
+            </p>
+          </section>
+          <CaptureIntro support={cap.support} className="order-2" />
+          <CaptureControls cap={cap} className="order-4" />
+          {frameNote && (
+            <p className="order-4 rounded-[var(--radius)] bg-[var(--paper)] p-3 text-base leading-relaxed text-[var(--text)]">
+              {frameNote}
+            </p>
+          )}
+          <section aria-label="AI解析" className="order-5 flex flex-col gap-4">
+            <h2 className="text-xl font-bold text-[var(--text)]">2. AI解析</h2>
+            <p className="text-base leading-relaxed text-[var(--dim)]">
+              動画がある場合は動画から複数のフレームを切り出して解析し、静止画も合わせて結果を集約します。結果は28種の正式名称で示され、そのまま所見の下書きに入ります。
+            </p>
+            <button
+              type="button"
+              disabled={
+                aiPhase === "working" || (images.length === 0 && !video)
+              }
+              onClick={() => void handleAnalyze()}
+              className="min-h-20 w-full rounded-[var(--radius)] bg-[var(--accent)] px-6 text-2xl font-bold text-white shadow-[var(--shadow-card)] disabled:opacity-40"
+            >
+              {aiPhase === "working"
+                ? aiProgress
+                  ? `AIが解析しています…（${aiProgress.done}/${aiProgress.total}枚）`
+                  : "AIが解析しています…"
+                : "AI解析をする"}
+            </button>
+            {images.length === 0 && !video && (
+              <p className="text-base text-[var(--dim)]">
+                画像も動画もまだないため使えません。撮影するか、ファイルから取り込んでください。
+              </p>
             )}
-            {onOtherImages.length > 0 && (
-              <ul className="flex flex-col gap-2" aria-label="AIの所見（別の画像で検出）">
-                {onOtherImages.map((c) => {
-                  const p = capillaryPatternByCode[c.code];
-                  if (!p) return null;
-                  const selected = selectedPatterns.includes(c.code);
-                  return (
-                    <li key={c.code}>
+            {aiPhase === "not-configured" && (
+              <p className="text-base text-[var(--text)]">
+                AI解析はまだ設定されていません。
+              </p>
+            )}
+            {aiPhase === "error" && aiNote && (
+              <p role="alert" className="text-base font-medium text-[var(--alert)]">
+                {aiNote}
+              </p>
+            )}
+            {aiPhase === "done" && aiNote && (
+              <p className="text-base text-[var(--dim)]">{aiNote}</p>
+            )}
+            {aiPhase === "done" && aggregated.length === 0 && (
+              <p className="text-lg text-[var(--text)]">
+                AIから候補は提示されませんでした。下の「28種から選び直す」から手で選ぶか、研究用モードで詳しく記録してください。
+              </p>
+            )}
+
+            {aiPhase === "done" && aggregated.length > 0 && (
+              <div className="flex flex-col gap-4">
+                <p className="text-base leading-relaxed text-[var(--text)]">
+                  AIの所見です（{aggregated[0]?.totalFrames ?? 0}
+                  枚の画像から集約）。上位{MAX_DRAFT_PATTERNS}
+                  件を下書きとして選択に入れています。外したり足したりできますが、基本はこの結果で進めます。
+                </p>
+                {representativeUrl && (
+                  <AnnotatedImage
+                    imageUrl={representativeUrl}
+                    imageAlt="AI解析の代表画像（番号マーカーつき）"
+                    items={annotationItems}
+                    listLabel="AIの所見（番号つき）"
+                  />
+                )}
+                {onOtherImages.length > 0 && (
+                  <ul className="flex flex-col gap-2" aria-label="AIの所見（別の画像で検出）">
+                    {onOtherImages.map((c) => {
+                      const p = capillaryPatternByCode[c.code];
+                      if (!p) return null;
+                      const selected = selectedPatterns.includes(c.code);
+                      return (
+                        <li key={c.code}>
+                          <button
+                            type="button"
+                            aria-pressed={selected}
+                            onClick={() => togglePattern(c.code)}
+                            className={`flex min-h-14 w-full flex-col gap-1 rounded-[var(--radius)] border-2 p-3 text-left ${
+                              selected
+                                ? "border-[var(--accent)] bg-[var(--accent-bg)]"
+                                : "border-[var(--border-strong)] bg-[var(--surface)]"
+                            }`}
+                          >
+                            <span className="flex flex-wrap items-center gap-2 text-lg font-bold text-[var(--text)]">
+                              No.{patternNumberByCode[c.code] ?? "―"} {p.name}
+                              <span className="rounded-full border border-[var(--border-strong)] px-2 py-0.5 text-sm font-bold text-[var(--accent-strong)]">
+                                {c.hitFrames}/{c.totalFrames}枚で検出・確からしさ：
+                                {confidenceLabels[c.bestConfidence]}
+                              </span>
+                              {selected && (
+                                <span className="rounded-full bg-[var(--accent)] px-2 py-0.5 text-sm font-bold text-white">
+                                  選択中
+                                </span>
+                              )}
+                            </span>
+                            {c.reason && (
+                              <span className="text-base leading-relaxed text-[var(--dim)]">
+                                {c.reason}
+                              </span>
+                            )}
+                            <span className="text-sm text-[var(--dim)]">
+                              押すと選択／解除できます。
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            {/* 選択中のパターンと、手で直すための入口 */}
+            <div className="flex flex-col gap-3">
+              <p className="text-lg font-bold text-[var(--text)]">
+                選択中の形：{selectedPatterns.length}件
+              </p>
+              {selectedPatterns.length > 0 && (
+                <div className="flex flex-wrap gap-2" aria-label="選択中のパターン">
+                  {selectedPatterns.map((code) => {
+                    const p = capillaryPatternByCode[code];
+                    if (!p) return null;
+                    return (
+                      <span
+                        key={code}
+                        className="flex items-center gap-1 rounded-full border border-[var(--accent)] bg-[var(--accent-bg)] py-0.5 pl-3 pr-0.5"
+                      >
+                        <span className="text-base font-bold text-[var(--accent-strong)]">
+                          No.{patternNumberByCode[code] ?? "―"} {p.name}
+                        </span>
+                        <button
+                          type="button"
+                          aria-label={`${p.name}の選択を外す`}
+                          onClick={() => togglePattern(code)}
+                          className="flex h-11 w-11 items-center justify-center rounded-full text-xl leading-none text-[var(--accent-strong)]"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+              {hasClinicalSelected && (
+                <p className="rounded-[var(--radius)] bg-[var(--alert-bg)] p-3 text-base leading-relaxed text-[var(--text)]">
+                  臨床フラグに当たる形が含まれています。レポートでは受診案内の対象として扱われます。
+                </p>
+              )}
+              <button
+                type="button"
+                aria-expanded={gridOpen}
+                onClick={() => setGridOpen((v) => !v)}
+                className="min-h-14 self-start rounded-[var(--radius)] border-2 border-[var(--accent)] bg-[var(--surface)] px-5 text-lg font-bold text-[var(--accent-strong)]"
+              >
+                {gridOpen ? "28種の一覧を閉じる" : "28種から選び直す"}
+              </button>
+              {gridOpen && (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  {capillaryPatterns.map((pattern) => {
+                    const selected = selectedPatterns.includes(pattern.code);
+                    return (
                       <button
+                        key={pattern.code}
                         type="button"
                         aria-pressed={selected}
-                        onClick={() => togglePattern(c.code)}
-                        className={`flex min-h-14 w-full flex-col gap-1 rounded-[var(--radius)] border-2 p-3 text-left ${
+                        onClick={() => togglePattern(pattern.code)}
+                        className={`relative flex min-h-14 flex-col gap-2 rounded-[var(--radius)] border-2 p-3 text-left ${
                           selected
                             ? "border-[var(--accent)] bg-[var(--accent-bg)]"
-                            : "border-[var(--border-strong)] bg-[var(--surface)]"
+                            : "border-[var(--border)] bg-[var(--surface)]"
                         }`}
                       >
-                        <span className="flex flex-wrap items-center gap-2 text-lg font-bold text-[var(--text)]">
-                          No.{patternNumberByCode[c.code] ?? "―"} {p.name}
-                          <span className="rounded-full border border-[var(--border-strong)] px-2 py-0.5 text-sm font-bold text-[var(--accent-strong)]">
-                            {c.hitFrames}/{c.totalFrames}枚で検出・確からしさ：
-                            {confidenceLabels[c.bestConfidence]}
-                          </span>
-                          {selected && (
-                            <span className="rounded-full bg-[var(--accent)] px-2 py-0.5 text-sm font-bold text-white">
-                              選択中
-                            </span>
-                          )}
-                        </span>
-                        {c.reason && (
-                          <span className="text-base leading-relaxed text-[var(--dim)]">
-                            {c.reason}
+                        {pattern.clinical && (
+                          <span
+                            aria-hidden
+                            title="臨床フラグ対応"
+                            className="absolute right-2 top-2 z-10 h-3.5 w-3.5 rounded-full border-2 border-white bg-[var(--alert)] shadow"
+                          />
+                        )}
+                        {selected && (
+                          <span
+                            aria-hidden
+                            className="absolute left-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-[var(--accent)] text-base font-bold text-white shadow"
+                          >
+                            ✓
                           </span>
                         )}
-                        <span className="text-sm text-[var(--dim)]">
-                          押すと選択／解除できます。
+                        <PatternDiagram
+                          code={pattern.code}
+                          title={`${pattern.name}の模式図`}
+                          className={`h-24 w-full rounded border ${
+                            selected ? "border-[var(--accent)]" : "border-[var(--border)]"
+                          }`}
+                        />
+                        <span className="text-base font-bold leading-snug text-[var(--text)] sm:text-lg">
+                          No.{patternNumberByCode[pattern.code] ?? "―"} {pattern.name}
                         </span>
                       </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-        )}
-
-        {/* 選択中のパターンと、手で直すための入口 */}
-        <div className="flex flex-col gap-3">
-          <p className="text-lg font-bold text-[var(--text)]">
-            選択中の形：{selectedPatterns.length}件
-          </p>
-          {selectedPatterns.length > 0 && (
-            <div className="flex flex-wrap gap-2" aria-label="選択中のパターン">
-              {selectedPatterns.map((code) => {
-                const p = capillaryPatternByCode[code];
-                if (!p) return null;
-                return (
-                  <span
-                    key={code}
-                    className="flex items-center gap-1 rounded-full border border-[var(--accent)] bg-[var(--accent-bg)] py-0.5 pl-3 pr-0.5"
-                  >
-                    <span className="text-base font-bold text-[var(--accent-strong)]">
-                      No.{patternNumberByCode[code] ?? "―"} {p.name}
-                    </span>
-                    <button
-                      type="button"
-                      aria-label={`${p.name}の選択を外す`}
-                      onClick={() => togglePattern(code)}
-                      className="flex h-11 w-11 items-center justify-center rounded-full text-xl leading-none text-[var(--accent-strong)]"
-                    >
-                      ×
-                    </button>
-                  </span>
-                );
-              })}
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          )}
-          {hasClinicalSelected && (
-            <p className="rounded-[var(--radius)] bg-[var(--alert-bg)] p-3 text-base leading-relaxed text-[var(--text)]">
-              臨床フラグに当たる形が含まれています。レポートでは受診案内の対象として扱われます。
+          </section>
+          {error && (
+            <p role="alert" className="order-6 text-lg font-medium text-[var(--alert)]">
+              {error}
             </p>
           )}
-          <button
-            type="button"
-            aria-expanded={gridOpen}
-            onClick={() => setGridOpen((v) => !v)}
-            className="min-h-14 self-start rounded-[var(--radius)] border-2 border-[var(--accent)] bg-[var(--surface)] px-5 text-lg font-bold text-[var(--accent-strong)]"
-          >
-            {gridOpen ? "28種の一覧を閉じる" : "28種から選び直す"}
-          </button>
-          {gridOpen && (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {capillaryPatterns.map((pattern) => {
-                const selected = selectedPatterns.includes(pattern.code);
-                return (
-                  <button
-                    key={pattern.code}
-                    type="button"
-                    aria-pressed={selected}
-                    onClick={() => togglePattern(pattern.code)}
-                    className={`relative flex min-h-14 flex-col gap-2 rounded-[var(--radius)] border-2 p-3 text-left ${
-                      selected
-                        ? "border-[var(--accent)] bg-[var(--accent-bg)]"
-                        : "border-[var(--border)] bg-[var(--surface)]"
-                    }`}
-                  >
-                    {pattern.clinical && (
-                      <span
-                        aria-hidden
-                        title="臨床フラグ対応"
-                        className="absolute right-2 top-2 z-10 h-3.5 w-3.5 rounded-full border-2 border-white bg-[var(--alert)] shadow"
-                      />
-                    )}
-                    {selected && (
-                      <span
-                        aria-hidden
-                        className="absolute left-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-[var(--accent)] text-base font-bold text-white shadow"
-                      >
-                        ✓
-                      </span>
-                    )}
-                    <PatternDiagram
-                      code={pattern.code}
-                      title={`${pattern.name}の模式図`}
-                      className={`h-24 w-full rounded border ${
-                        selected ? "border-[var(--accent)]" : "border-[var(--border)]"
-                      }`}
-                    />
-                    <span className="text-base font-bold leading-snug text-[var(--text)] sm:text-lg">
-                      No.{patternNumberByCode[pattern.code] ?? "―"} {pattern.name}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          <div className="sticky bottom-0 z-20 order-7 -mx-4 border-t border-[var(--border)] bg-[var(--bg)]/95 px-4 py-3 shadow-[0_-8px_16px_-12px_rgba(13,59,76,0.35)] backdrop-blur max-lg:shrink-0 sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0 lg:pb-1">
+            <button
+              type="button"
+              disabled={create.isPending}
+              onClick={handleSave}
+              className="min-h-16 w-full rounded-[var(--radius)] bg-[var(--accent)] px-6 text-xl font-bold text-white disabled:opacity-40"
+            >
+              {create.isPending ? "保存しています…" : "保存してレポートを作成"}
+            </button>
+          </div>
         </div>
-      </section>
-
-      {error && (
-        <p role="alert" className="text-lg font-medium text-[var(--alert)]">
-          {error}
-        </p>
-      )}
-      <div className="sticky bottom-0 z-20 -mx-4 border-t border-[var(--border)] bg-[var(--bg)]/95 px-4 py-3 shadow-[0_-8px_16px_-12px_rgba(13,59,76,0.35)] backdrop-blur sm:-mx-6 sm:px-6">
-        <button
-          type="button"
-          disabled={create.isPending}
-          onClick={handleSave}
-          className="min-h-16 w-full rounded-[var(--radius)] bg-[var(--accent)] px-6 text-xl font-bold text-white disabled:opacity-40"
-        >
-          {create.isPending ? "保存しています…" : "保存してレポートを作成"}
-        </button>
+        <div className="contents lg:order-2 lg:block lg:min-h-0">
+          <CaptureMediaDisplay cap={cap} className="order-3 lg:h-full" />
+        </div>
       </div>
     </div>
   );

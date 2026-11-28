@@ -1110,7 +1110,7 @@ export function CaptureMediaDisplay({
           className={
             fsActive
               ? `fixed inset-0 z-[100] h-full w-full overflow-hidden bg-[var(--video-bg)] ${zoomRect ? "cursor-grab touch-none" : ""}`
-              : `relative h-44 overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-[var(--video-bg)] sm:h-60 lg:min-h-0 lg:flex-1 ${zoomRect ? "cursor-grab touch-none" : ""}`
+              : `relative h-[52dvh] overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-[var(--video-bg)] sm:h-[58dvh] lg:min-h-0 lg:flex-1 ${zoomRect ? "cursor-grab touch-none" : ""}`
           }
         >
           <video

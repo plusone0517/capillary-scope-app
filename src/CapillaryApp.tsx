@@ -1572,10 +1572,9 @@ export function CapillaryApp() {
   };
 
   // 観察の入力・編集画面は分割レイアウトで画像を大きく見せるため幅を広げる。
-  // それ以外の画面の幅は従来どおり。一般検査の新しい観察は1カラムの
-  // 簡易画面なので広げない。
-  const wideView =
-    view.kind === "edit" || (view.kind === "new" && mode === "research");
+  // 一般検査の新しい観察も2カラム化したので同じく広げる。
+  // それ以外の画面の幅は従来どおり。
+  const wideView = view.kind === "edit" || view.kind === "new";
 
   return (
     <div className="min-h-screen bg-[var(--bg)]">
