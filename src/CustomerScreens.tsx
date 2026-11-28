@@ -40,9 +40,14 @@ export function CustomerListScreen({ go }: { go: Go }) {
   const [input, setInput] = useState("");
   const [search, setSearch] = useState("");
   const [registering, setRegistering] = useState(false);
+  // 顧客の名前は、探したときだけ出す（画面をお客様と一緒に見ることがあるため、
+  // 開いただけで他の方の名前が並ばないようにする）。全員を見たいときはボタンで出す。
+  const [showAll, setShowAll] = useState(false);
+  const listing = search.trim() !== "" || showAll;
   const list = useQuery({
     queryKey: ["customers", search],
     queryFn: () => api.listCustomers({ search }),
+    enabled: listing,
   });
   const create = useMutation({
     mutationFn: (v: Parameters<typeof api.createCustomer>[0]) => api.createCustomer(v),
@@ -84,7 +89,7 @@ export function CustomerListScreen({ go }: { go: Go }) {
         className="flex gap-2"
         onSubmit={(e) => {
           e.preventDefault();
-          setSearch(input);
+          setSearch(input.trim());
         }}
       >
         <input
@@ -100,16 +105,43 @@ export function CustomerListScreen({ go }: { go: Go }) {
         </button>
       </form>
 
-      {list.isLoading && <LoadingState label="顧客を読み込み中…" />}
-      {list.error && <ErrorState message={describeFirebaseError(list.error)} />}
-      {list.data && list.data.customers.length === 0 && (
+      {!listing && (
+        <div className={`${cardClass} flex flex-col gap-3 p-5`}>
+          <p className="text-lg leading-relaxed text-[var(--text)]">
+            会員番号・お名前・ふりがなで検索すると、該当する方だけを表示します。
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowAll(true)}
+            className="min-h-11 self-start rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface)] px-4 text-base text-[var(--text)]"
+          >
+            全員を表示する
+          </button>
+        </div>
+      )}
+      {listing && list.isLoading && <LoadingState label="顧客を読み込み中…" />}
+      {listing && list.error && <ErrorState message={describeFirebaseError(list.error)} />}
+      {listing && list.data && list.data.customers.length === 0 && (
         <p className={`${cardClass} p-5 text-lg text-[var(--dim)]`}>
           {search ? "該当する顧客が見つかりません。" : "まだ顧客が登録されていません。"}
         </p>
       )}
-      {list.data && list.data.customers.length > 0 && (
+      {listing && list.data && list.data.customers.length > 0 && (
         <>
-          <p className="text-base text-[var(--dim)]">{list.data.customers.length}人</p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-base text-[var(--dim)]">{list.data.customers.length}人</p>
+            <button
+              type="button"
+              onClick={() => {
+                setShowAll(false);
+                setSearch("");
+                setInput("");
+              }}
+              className="min-h-11 rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface)] px-4 text-base text-[var(--text)]"
+            >
+              表示を閉じる
+            </button>
+          </div>
           <ul className="flex flex-col gap-2">
             {list.data.customers.map((c) => (
               <li key={c.id}>

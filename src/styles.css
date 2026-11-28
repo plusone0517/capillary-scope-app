@@ -276,3 +276,13 @@ input:focus {
   font-size: 12px;
   font-weight: 600;
 }
+
+/* 日付の入力欄（iPhone・iPad）：そのままだと枠より横に広がるので、枠の幅に収める。 */
+input[type="date"] {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+}

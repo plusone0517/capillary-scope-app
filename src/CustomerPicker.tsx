@@ -19,10 +19,12 @@ export function CustomerPicker({
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [registering, setRegistering] = useState(false);
+  // 顧客の名前は、文字を入れて探したときだけ出す（開いただけで他の方の名前が並ばないように）。
+  const searching = search.trim() !== "";
   const list = useQuery({
     queryKey: ["customers", search],
     queryFn: () => api.listCustomers({ search }),
-    enabled: !value,
+    enabled: !value && searching,
   });
   const create = useMutation({
     mutationFn: async (input: Parameters<typeof api.createCustomer>[0]) => {
@@ -62,7 +64,7 @@ export function CustomerPicker({
     );
   }
 
-  const results = list.data?.customers ?? [];
+  const results = searching ? (list.data?.customers ?? []) : [];
   const shown = results.slice(0, 6);
 
   return (
@@ -84,7 +86,14 @@ export function CustomerPicker({
       </label>
       {!registering && (
         <>
-          {list.isLoading && <p className="text-base text-[var(--dim)]">探しています…</p>}
+          {!searching && (
+            <p className="text-base text-[var(--dim)]">
+              文字を入れると、該当する方が出ます。
+            </p>
+          )}
+          {searching && list.isLoading && (
+            <p className="text-base text-[var(--dim)]">探しています…</p>
+          )}
           {shown.length > 0 && (
             <ul className="flex flex-col overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)]">
               {shown.map((c) => (
@@ -109,7 +118,7 @@ export function CustomerPicker({
               ほかに{results.length - shown.length}人います。文字を足して絞り込んでください。
             </p>
           )}
-          {list.data && results.length === 0 && (
+          {searching && list.data && results.length === 0 && (
             <p className="text-base text-[var(--dim)]">該当する顧客が見つかりません。</p>
           )}
           <button
