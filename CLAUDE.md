@@ -1,0 +1,131 @@
+# 毛細血管 観察・記録システム — 引き継ぎドキュメント
+
+このファイルは、Muse（チャット側）で開発してきた内容を Claude Code へ引き継ぐための正本です。作業前に必ず全文を読んでください。最終更新: 2026-11-28。
+
+## プロダクト概要
+
+- 爪郭毛細血管スコープ（3R Solution 血流ドクターオート／3R-DRAUTO、USB/UVC系）の観察・記録・レポート作成を行う院内スタッフ用 Web アプリ。
+- 本番URL: https://medipro-capillary-scope.web.app
+- 開発体制: メディプロ医薬が開発し、合同会社ルーツオブライフへ納品する形（サイバー保険がメディプロ側にあるため、Firebase プロジェクトもメディプロ側で所有）。
+- 利用者: 院内スタッフ（メール/パスワードでログイン）。対象者は記録を見る側で、このアプリにはログインしない。
+
+## 医療・表現の線引き（絶対条件）
+
+- 診断・病名の断定、治療・製品の効能の断定はしない。「観察の記録と生活アドバイス」の範囲に限る。
+- 臨床フラグ（巨大毛細血管・微小出血・脱落・分枝など）に該当する場合は、受診案内を出す。
+- レポート文体: 一般向けの平易な日本語、クリニック的な信頼感のある落ち着いた文体。独自の比喩見出し、否定的な表現、注意書き・免責のような注記は禁止。まとめは箇条書きではなく流れる文章。
+- パターンの表示は28種の正式名称＋番号のみ。**愛称（「グニュグニュ」等）は禁止**（ユーザーの明示指示）。
+
+## アプリの構成（2026-11-28 時点）
+
+2モード制。右上のセグメントで切り替え、選択は localStorage `capillary-app:mode` に保持。既定は一般検査。
+
+- **一般検査（simple）**: 入力は対象者のお名前だけ。指は左手・薬指で固定、日時は自動。大きな「AI解析をする」ボタンが主役：動画から等間隔に最大4フレーム＋静止画（合計最大5枚）を解析し、フレームをまたいで集約（出現フレーム数が多い順）。臨床フラグは選択パターンから保存時に自動で立てる。
+- **研究用（research）**: 従来の詳細フォーム全部（撮影条件、所見、自動計測、血流速度、AI候補、AIレポート下書き、試験情報、CSV出力）。
+
+狙い: 画像を28種に当て込むこと自体がアプリの目的。誰が検査しても同じ回答に近づけるため、AIを主役にし、人は最終確認をする。
+
+## 技術構成
+
+- フロント: Vite + React + TypeScript。`src/` 直下にフラット配置。TanStack Query 使用。
+  - 主要ファイル: `CapillaryApp.tsx`（画面遷移・一覧・研究用フォーム）、`SimpleExam.tsx`（一般検査）、`CapturePanel.tsx`（撮影一式：カメラ選択/調整/AF/全画面撮影、`CaptureMediaDisplay` と `CaptureControls` と `useCapturePanel` を提供）、`camera.ts`、`autoMeasure.ts`（ブラウザ内自動計測の試作）、`aiAnalysis.ts`（複数フレーム集約）、`AnnotatedImage.tsx`（輪＋番号＋ラベルの注釈表示）、`capillaryPatterns.ts`（28種の正本データ）、`patternDiagrams.ts`（模式図SVG）、`theme.css`（色の正本は :root の CSS 変数）。
+  - テーマ: 医療系ネイビー/ティール（基調 #0D3B4C、操作 #12808A、背景 #F4F7F8）。赤 #C1272D は臨床フラグ・破壊的操作・エラー・録画中のみ。
+  - レイアウト: 観察の新規・編集画面は2カラム（左 minmax(400px,470px) に操作系を集めカラム内スクロール、右に画像全面）。`CapillaryApp.tsx` の `wideView`（new/edit で max-w-[1680px]）。
+- バックエンド: Firebase（Auth / Firestore / Storage / Functions 第2世代 Node.js 22、asia-northeast1）。
+
+## Firebase プロジェクト
+
+- プロジェクトID: `medipro-capillary-scope`、番号: 775174442635、所有: plusone0517@gmail.com。
+- プラン: Blaze（従量課金）化済み。
+- Firestore: asia-northeast1（東京）、本番モード。
+- Storage: 主保存先は東京バケット **`medipro-capillary-scope-tokyo`**（ビルド時環境変数で指定）。既定バケット `medipro-capillary-scope.firebasestorage.app`（US）は全面拒否ルールのまま未使用なので、そちらへ向ける設定に戻さないこと。
+- 最初のスタッフ: plusone0517@gmail.com（UID `ONQhYIv7GUQUZP1ARW4exXLVMAF2`、staff 文書は role: admin / active: true（真偽値））。
+- firebaseConfig（公開識別子、そのまま使ってよい）: apiKey `AIzaSyD1Iyk-sROWyeGpkk1cX6kZGxtORKige64` / authDomain `medipro-capillary-scope.firebaseapp.com` / projectId `medipro-capillary-scope` / messagingSenderId `775174442635` / appId `1:775174442635:web:eac4a5010f4a5484414e8e`。
+
+### ハマりどころ（解決済み・再発防止）
+
+- 保存が `storage/unauthorized` になった原因はコードでもルールでもなく、**Storage ルールが Firestore の staff 文書を読むためのサービス間権限**（Storage サービスアカウント `service-775174442635@gcp-sa-firebasestorage.iam.gserviceaccount.com` への `roles/firebaserules.firestoreServiceAgent`）が未付与だったこと。付与済み。ルールを疑う前にこの権限を確認すること。
+- 保存済み動画の解析は、ダウンロードURLのまま `<video>` で読むと Canvas が cross-origin でブロックされる。必ず Storage から認証つき Blob を取得して object URL で読む（FlowMeasure の実装が正）。
+
+## データモデル
+
+- コレクション: `staff` / `patients` / `observations` / `reports` / `claims`（受け取りトークンは SHA-256 ハッシュ・期限・使用済み管理、クライアント書込禁止）/ `auditLogs`。
+- observations の削除・reports の削除は admin のみ（ルールと画面の両方）。
+- 一般検査の所見まとめは `observations.summaryNote` に保存（レポート表示時は summaryNote 優先、なければ従来の自動組立）。
+- Storage パス: `capillary/{patientId}/{observationId}/images|videos/{fileName}`。
+
+## Functions（4関数、asia-northeast1）
+
+- `issueClaimToken` / `verifyAndConsumeClaim`: ルーツマイル側への受け渡し用 QR トークンの発行・検証（段階2で使用予定。有効期限は設計案の90日を定数化済み）。
+- `analyzeImagePatterns`: 画像（base64、氏名・IDは送らない）→ 28種の候補を最大4件 `{code, confidence, reason, location{x,y}}` で返す。AI が自動で選択状態にすることは絶対にしない（候補提示のみ、最終選択はスタッフ）。
+- `draftReportText`: 所見のまとめ＋アドバイスの下書き生成。生成文は編集可能な欄に入るだけ（自動確定・自動保存はしない）。プロンプトに文体ルール（上記「医療・表現の線引き」）を明記済み。
+- モデル: 既定は **`gpt-6-luna`**（2026-11-28 に gpt-4o から変更）。環境変数 `OPENAI_VISION_MODEL` / `OPENAI_TEXT_MODEL` で差し替え可能。
+  - 注意: gpt-5 / gpt-6 系の推論モデルは Chat Completions で `temperature` を受け付けない。コード側でモデル名を見て `reasoning_effort`（解析=none、下書き=low）に置き換える実装にしてある。新モデルへ変えるときはこの分岐を確認すること。
+- APIキー: Secret Manager の `OPENAI_API_KEY`（ユーザーがコンソールで登録）。**キーの値をチャット・コード・このファイルに書かないこと。** 未設定時は例外にせず `{ configured: false }` を返し、画面は「AI解析はまだ設定されていません」表示になる。
+
+## デプロイ手順（現行・手動）
+
+GitHub Actions は未成立（後述）。現在は Google Cloud Shell から手動デプロイする。
+
+```bash
+git clone https://github.com/plusone0517/capillary-scope-app.git  # 2回目以降は git pull
+cd capillary-scope-app
+rm -rf ~/.npm
+npm ci
+VITE_FIREBASE_API_KEY=AIzaSyD1Iyk-sROWyeGpkk1cX6kZGxtORKige64 \
+VITE_FIREBASE_AUTH_DOMAIN=medipro-capillary-scope.firebaseapp.com \
+VITE_FIREBASE_PROJECT_ID=medipro-capillary-scope \
+VITE_FIREBASE_STORAGE_BUCKET=medipro-capillary-scope-tokyo \
+VITE_FIREBASE_MESSAGING_SENDER_ID=775174442635 \
+VITE_FIREBASE_APP_ID=1:775174442635:web:eac4a5010f4a5484414e8e \
+npm run build
+npx -y firebase-tools deploy --only hosting --project medipro-capillary-scope --non-interactive
+```
+
+- Functions を変えたとき: `cd functions && npm ci && npm run build && cd ..` してから `--only functions`（または hosting と同時）。
+- Cloud Shell の /home は容量不足（ENOSPC）になりやすい。デプロイが容量で落ちたら `rm -rf node_modules ~/.npm` で空け、dist（Functions のときは functions/lib）が残っていることを確認して、デプロイコマンドだけ再実行すれば通る（毎回この2回目で成功している）。
+
+### GitHub Actions（未成立・直し方）
+
+- ワークフロー正本はリポジトリ内 `.github/workflows/firebase-deploy.yml`（WIF 経由、SA `github-deployer@medipro-capillary-scope.iam.gserviceaccount.com`、GCP 側設定は完了済み）。
+- 問題: GitHub 上にファイルが二重パス `.github/workflows/firebase-deploy.yml/firebase-deploy.yml` で置かれてしまった。GitHub の画面/API から二重パスの方を削除し、正しいパスに1ファイルだけ残せば自動デプロイが成立する見込み。なお GitHub App 連携経由では `.github/workflows/` 配下への書き込みが 403 になるため、この修正はユーザーが GitHub の画面から行う必要がある。
+
+## GitHub リポジトリ
+
+- `plusone0517/capillary-scope-app`（**Public のまま**。Private 化はユーザーの判断待ちなので、勝手に変えない）。
+- チャット側 Muse からは git ではなくスナップショット push で同期してきた。Claude Code では通常の git clone / commit / push でよい。
+
+## 撮影まわりの仕様
+
+- カメラは権限取得後に列挙し「保存済み選択 → ラベルに Anyty を含むもの → 外部カメラ → 先頭」の順で自動選択。手動選択は localStorage `capillary-scope-camera-device-id` に保持。Windows ではスコープは「Anyty」と認識される。
+- カメラ調整: 解像度プリセット（localStorage `capillary-scope-camera-resolution`）、明るさ（capabilities に brightness があればカメラ側、なければ CSS フィルタ＋静止画への Canvas 補正）、ズーム（カメラ側 zoom があればそれ、なければデジタルズーム1〜3倍＋ドラッグでパン、静止画は表示範囲どおり切り出し）。**ソフトウェア補正は動画には反映されない**（血流速度計測のタイミング安定性を優先する仕様）。
+- オートフォーカス: capabilities.focusMode に single-shot があれば AF ボタン、continuous があれば連続 AF トグル、focusDistance があれば手動スライダー。どれも無い環境では「ピントの合い具合（目安）」（ラプラシアン分散の相対バー）にフォールバック。Anyty が focusMode を公開するかは実機依存で未検証。
+- 全画面撮影モード: プレビュー右上のボタンから。映像のみ全画面（Fullscreen API、不可なら fixed オーバーレイ）、下部に撮影・録画ボタンとサムネイル。
+- 撮影標準手順（アプリの前提）: 非利き手の左薬指、室温20–25℃、安静15分、手は心臓の高さ、カフェイン・喫煙は2時間前まで回避、イマージョンオイル1滴、1指3–5枚。経時比較の主軸は密度（loops/mm）。
+
+## 解析の試作（現状と限界）
+
+- 自動計測（`autoMeasure.ts`）: ブラウザ内 Canvas で完結（外部送信なし）。緑吸収ベースの信号→二値化→連結成分。較正なしでは mm 換算を出さない。**既知の課題: 実画像での抽出がまだらで血管の形を拾い切れていない。チューニング未了。**
+- AI の location（候補の位置％）はモデルの返す座標依存で、実機での妥当性は未検証。
+- 血流速度は動画からの試作計測（ピクセル基準）。保存済み動画は Blob 経由で読むこと（上記のハマりどころ参照）。
+
+## 監査・経緯ドキュメント
+
+- `AUDIT-2026-11-28.md`: 全フロー監査で直した13件＋軽微1件の記録。見送り事項として「一覧検索が直近200件まで」がある（設計判断待ち）。
+
+## 未決・残作業
+
+1. ユーザーの実機再確認（一般検査の一連フロー、AF の実機挙動、注釈の分かりやすさ、gpt-6-luna での解析結果）。
+2. 自動計測の抽出品質チューニング。
+3. USB-C iPad（Safari）での通し実機テスト（撮影→所見→保存→確定→QR発行）。
+4. GitHub Actions の二重パス修正（ユーザー作業）、リポジトリの Private 化（ユーザー判断）。
+5. パターンごとのアドバイス文面（下書き→ユーザー確認。サンプル分のみ存在）。
+6. 段階2: ルーツマイル側の QR 取り込み口（未着手。段階1の実機確認後にユーザーのゴーサイン待ち）。設計は pull/claim 方式（QR には reportId＋推測不能・期限付き・1回限りトークン）。
+7. 未決: 取り込み後の院内側原本の保管期間、非会員の来院者の扱い、ルーツ側の取り込みが会員本人前提かどうか。
+
+## 作業上の約束（ユーザーとの合意）
+
+- 本番反映（main への push・デプロイ）は原則ユーザーの明示承認が出てから。2026-11-28 夕方の一連の修正については「確認待ちなしで公開」の指示あり（その範囲のみ）。
+- **「直した」と言う前に実フローで検証する。** 過去に助手側の自己評価90点に対しユーザーの実機評価が30点（赤点）だった経緯がある。ユーザーの点数が正。
+- 変更は小さく分け、ビルド（ルート `npm run build`、Functions は `functions/` で `npm run build`）を通してから push する。
+- UI 文言・画面は日本語。エラーは Firebase の英語をそのまま出さず日本語化する（`describeFirebaseError` に統一済み）。
