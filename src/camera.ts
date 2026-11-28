@@ -358,6 +358,79 @@ export async function captureFramesFromVideoUrl(
   }
 }
 
+/* ============ ピントの合い具合（シャープネス指標） ============ */
+
+/**
+ * シャープネス計測用の使い回しキャンバス。
+ * ブラウザからフォーカス制御が出ていないカメラ向けに、プレビュー映像の
+ * 「ピントの合い具合」を数値化するためのもの（AFそのものではない）。
+ */
+export type SharpnessMeter = {
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D | null;
+};
+
+export function createSharpnessMeter(): SharpnessMeter {
+  const canvas = document.createElement("canvas");
+  return {
+    canvas,
+    ctx: canvas.getContext("2d", { willReadFrequently: true }),
+  };
+}
+
+/** 計測に使う縮小幅。小さいほど軽いが、細い血管のコントラストは落ちる。 */
+const SHARPNESS_WIDTH = 160;
+
+/**
+ * video の現在フレームのシャープネス（ラプラシアンの分散）を返す。
+ * ピントが合っているほど輪郭が立つため値が大きくなる。相対比較専用の
+ * 目安であり、絶対値に意味はない。映像がまだ読めない場合は null。
+ * CSS の明るさ補正などは video 要素の描画だけに効くため、この計測は
+ * カメラ映像そのもののピントを測る。
+ */
+export function measureSharpness(
+  video: HTMLVideoElement,
+  meter: SharpnessMeter,
+): number | null {
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  if (!vw || !vh || !meter.ctx) return null;
+  const w = SHARPNESS_WIDTH;
+  const h = Math.max(2, Math.round((SHARPNESS_WIDTH * vh) / vw));
+  if (meter.canvas.width !== w || meter.canvas.height !== h) {
+    meter.canvas.width = w;
+    meter.canvas.height = h;
+  }
+  const ctx = meter.ctx;
+  ctx.drawImage(video, 0, 0, w, h);
+  let data: Uint8ClampedArray;
+  try {
+    data = ctx.getImageData(0, 0, w, h).data;
+  } catch {
+    return null;
+  }
+  const gray = new Float32Array(w * h);
+  for (let i = 0, p = 0; i < gray.length; i++, p += 4) {
+    gray[i] = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
+  }
+  let sum = 0;
+  let sumSq = 0;
+  let n = 0;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const idx = y * w + x;
+      const lap =
+        gray[idx - w] + gray[idx + w] + gray[idx - 1] + gray[idx + 1] - 4 * gray[idx];
+      sum += lap;
+      sumSq += lap * lap;
+      n++;
+    }
+  }
+  if (n === 0) return null;
+  const mean = sum / n;
+  return Math.max(0, sumSq / n - mean * mean);
+}
+
 export type CameraSupport =
   | { kind: "ok" }
   | { kind: "iphone" }

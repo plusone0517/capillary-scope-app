@@ -24,16 +24,19 @@ import {
 blobToCapturedVideo,
 captureFromVideo,
 computeZoomRect,
+createSharpnessMeter,
 cropFromZoomRect,
 detectCameraSupport,
 detectRecorderSupport,
 fileToCaptured,
 fileToCapturedVideo,
 isIPad,
+measureSharpness,
 pickRecorderMimeType,
 type CaptureOptions,
 type CapturedImage,
 type CapturedVideo,
+type SharpnessMeter,
 } from "./camera";
 
 const MAX_IMAGES = 5;
@@ -83,6 +86,9 @@ type TrackCaps = {
   height?: { min?: number; max?: number };
   brightness?: { min: number; max: number; step?: number };
   zoom?: { min: number; max: number; step?: number };
+  /** 対応するフォーカス方式（"single-shot" / "continuous" / "manual" / "none"）。 */
+  focusMode?: string[];
+  focusDistance?: { min: number; max: number; step?: number };
 };
 
 function readTrackCaps(track: MediaStreamTrack): TrackCaps {
@@ -104,17 +110,35 @@ function readTrackSetting(track: MediaStreamTrack, key: string): number | null {
   }
 }
 
-/** ハードウェア制御（明るさ・ズーム）をトラックへ当てる。失敗しても撮影は続ける。 */
+/**
+ * ハードウェア制御（明るさ・ズーム・フォーカス）をトラックへ当てる。
+ * 失敗しても撮影は続ける。完了を待ちたい呼び出し（AFなど）のため Promise を返す。
+ */
 function applyAdvanced(
   track: MediaStreamTrack,
-  set: Record<string, number>,
-): void {
+  set: Record<string, number | string>,
+): Promise<void> {
   try {
-    void track
+    return track
       .applyConstraints({ advanced: [set] } as MediaTrackConstraints)
       .catch(() => undefined);
   } catch {
     // 未対応の環境では何もしない（ソフトウェア側の表示にフォールバックする）。
+    return Promise.resolve();
+  }
+}
+
+/** getSettings() から文字列の設定値（focusMode など）を安全に読む。 */
+function readTrackSettingString(
+  track: MediaStreamTrack,
+  key: string,
+): string | null {
+  try {
+    const settings = track.getSettings() as Record<string, unknown>;
+    const value = settings[key];
+    return typeof value === "string" ? value : null;
+  } catch {
+    return null;
   }
 }
 
@@ -212,7 +236,7 @@ export function useCapturePanel({
   const [busy, setBusy] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recordElapsed, setRecordElapsed] = useState(0);
-  // ===== カメラ調整（解像度・明るさ・ズーム）=====
+  // ===== カメラ調整（解像度・明るさ・ズーム・フォーカス）=====
   /** プレビュー枠の要素。撮影時のデジタルズーム切り出し計算に使う。 */
   const previewBoxRef = useRef<HTMLDivElement | null>(null);
   const [resolutionKey, setResolutionKeyState] =
@@ -239,6 +263,26 @@ export function useCapturePanel({
   const [digitalZoom, setDigitalZoom] = useState(1);
   /** デジタルズームの表示位置（-1〜1、中心からのずれ）。 */
   const [digitalPan, setDigitalPan] = useState({ x: 0, y: 0 });
+  // ===== フォーカス（ハードウェアAF／手動／合い具合の目安）=====
+  /** ハードウェア手動フォーカスの現在値（capabilities の単位のまま）。 */
+  const [hwFocusDistance, setHwFocusDistance] = useState<number | null>(null);
+  /** 連続AFがオンかどうか。 */
+  const [continuousAf, setContinuousAfState] = useState(false);
+  /** ワンショットAFの実行状態。 */
+  const [focusState, setFocusState] = useState<"idle" | "working" | "done">(
+    "idle",
+  );
+  const focusTimerRef = useRef<number | null>(null);
+  /**
+   * ピントの合い具合（目安）。ハードウェア制御が出ていないカメラ向けに、
+   * プレビュー映像のシャープネスを測る。max はカメラ開始後の最大値で、
+   * バーの伸び具合（相対評価）に使う。
+   */
+  const [sharpness, setSharpness] = useState<{ value: number; max: number } | null>(
+    null,
+  );
+  const sharpnessMeterRef = useRef<SharpnessMeter | null>(null);
+  const sharpnessMaxRef = useRef(0);
 
   const brightnessRange = trackCaps.brightness;
   const zoomRange = trackCaps.zoom;
@@ -246,6 +290,17 @@ export function useCapturePanel({
   const brightnessMode: "hw" | "sw" = brightnessRange ? "hw" : "sw";
   /** ズーム：ハードウェア制御が使えるか（使えない場合はデジタルズーム）。 */
   const zoomMode: "hw" | "digital" = zoomRange ? "hw" : "digital";
+  const focusDistanceRange = trackCaps.focusDistance;
+  const focusModes = trackCaps.focusMode ?? [];
+  /** ワンショットAF（ボタンを押して1回合わせる）が使えるか。 */
+  const hasSingleShotAf = focusModes.includes("single-shot");
+  /** 連続AF（常時合わせ続ける）が使えるか。 */
+  const hasContinuousAf = focusModes.includes("continuous");
+  /**
+   * フォーカスのハードウェア制御が何かしら使えるか。
+   * 使えない場合はシャープネスによる「合い具合の目安」にフォールバックする。
+   */
+  const hasHwFocus = hasSingleShotAf || hasContinuousAf || focusDistanceRange != null;
 
   /** カメラの能力範囲に収まる解像度プリセットだけを候補にする。 */
   const resolutionOptions = RESOLUTION_PRESETS.filter((preset) => {
@@ -301,6 +356,77 @@ export function useCapturePanel({
     }
   }, [zoomRange, setZoomValue]);
 
+  /** ハードウェアの手動フォーカス（focusDistance）を当てる。 */
+  const setFocusDistanceValue = useCallback(
+    (value: number) => {
+      const track = streamRef.current?.getVideoTracks()[0];
+      if (!focusDistanceRange || !track) return;
+      const clamped = Math.min(
+        focusDistanceRange.max,
+        Math.max(focusDistanceRange.min, value),
+      );
+      setHwFocusDistance(clamped);
+      applyAdvanced(track, { focusDistance: clamped });
+    },
+    [focusDistanceRange],
+  );
+
+  /** 連続AFのオン/オフを当てる。オフ側は manual があれば manual、なければ none。 */
+  const setContinuousAf = useCallback(
+    (on: boolean) => {
+      const track = streamRef.current?.getVideoTracks()[0];
+      if (!track) return;
+      setContinuousAfState(on);
+      const modes = trackCaps.focusMode ?? [];
+      applyAdvanced(track, {
+        focusMode: on ? "continuous" : modes.includes("manual") ? "manual" : "none",
+      });
+    },
+    [trackCaps.focusMode],
+  );
+
+  /** ワンショットAF：focusMode に single-shot を当てて1回ピント合わせさせる。 */
+  const runSingleShotAf = useCallback(async () => {
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (!track) return;
+    if (focusTimerRef.current != null) {
+      window.clearTimeout(focusTimerRef.current);
+      focusTimerRef.current = null;
+    }
+    setFocusState("working");
+    await applyAdvanced(track, { focusMode: "single-shot" });
+    // UVC のAF動作は非同期に進み完了通知もないため、少し置いてから完了表示にする。
+    focusTimerRef.current = window.setTimeout(() => {
+      setFocusState("done");
+      focusTimerRef.current = window.setTimeout(() => {
+        setFocusState("idle");
+        focusTimerRef.current = null;
+      }, 2500);
+    }, 1200);
+  }, []);
+
+  // ハードウェアのフォーカス制御が出ていない間だけ、プレビューの
+  // シャープネスを周期的に測って「ピントの合い具合（目安）」を更新する。
+  useEffect(() => {
+    if (!cameraOn || hasHwFocus) {
+      setSharpness(null);
+      sharpnessMaxRef.current = 0;
+      return;
+    }
+    const id = window.setInterval(() => {
+      const videoEl = videoRef.current;
+      if (!videoEl) return;
+      if (!sharpnessMeterRef.current) {
+        sharpnessMeterRef.current = createSharpnessMeter();
+      }
+      const value = measureSharpness(videoEl, sharpnessMeterRef.current);
+      if (value == null) return;
+      if (value > sharpnessMaxRef.current) sharpnessMaxRef.current = value;
+      setSharpness({ value, max: sharpnessMaxRef.current });
+    }, 300);
+    return () => window.clearInterval(id);
+  }, [cameraOn, hasHwFocus]);
+
   const stopStream = useCallback(() => {
     if (recorderRef.current && recorderRef.current.state !== "inactive") {
       discardRecordingRef.current = true;
@@ -315,6 +441,15 @@ export function useCapturePanel({
     setCurrentSize(null);
     setHwBrightness(null);
     setHwZoom(null);
+    setHwFocusDistance(null);
+    setContinuousAfState(false);
+    setFocusState("idle");
+    if (focusTimerRef.current != null) {
+      window.clearTimeout(focusTimerRef.current);
+      focusTimerRef.current = null;
+    }
+    setSharpness(null);
+    sharpnessMaxRef.current = 0;
   }, []);
 
   const stopRecording = useCallback(() => {
@@ -487,6 +622,13 @@ export function useCapturePanel({
           const current = readTrackSetting(track, "zoom");
           setHwZoom(current ?? caps.zoom.min);
         }
+        if (caps.focusDistance) {
+          const current = readTrackSetting(track, "focusDistance");
+          setHwFocusDistance(current ?? caps.focusDistance.min);
+        }
+        setContinuousAfState(
+          readTrackSettingString(track, "focusMode") === "continuous",
+        );
       }
     } catch (err) {
       setCameraError(describeCameraError(err));
@@ -622,7 +764,7 @@ export function useCapturePanel({
     previewBoxRef,
     fileInputRef,
     videoFileInputRef,
-    // カメラ調整（解像度・明るさ・ズーム）
+    // カメラ調整（解像度・明るさ・ズーム・フォーカス）
     resolutionKey,
     resolutionOptions,
     changeResolution,
@@ -640,6 +782,18 @@ export function useCapturePanel({
     digitalPan,
     setDigitalPan,
     resetZoomView,
+    // フォーカス（ハードウェアAF／手動／合い具合の目安）
+    hasHwFocus,
+    hasSingleShotAf,
+    hasContinuousAf,
+    continuousAf,
+    setContinuousAf,
+    runSingleShotAf,
+    focusState,
+    focusDistanceRange,
+    hwFocusDistance,
+    setFocusDistanceValue,
+    sharpness,
     support,
     recorderOk,
     ipad,
@@ -1002,6 +1156,17 @@ export function CaptureControls({
     digitalZoom,
     setZoomValue,
     resetZoomView,
+    hasHwFocus,
+    hasSingleShotAf,
+    hasContinuousAf,
+    continuousAf,
+    setContinuousAf,
+    runSingleShotAf,
+    focusState,
+    focusDistanceRange,
+    hwFocusDistance,
+    setFocusDistanceValue,
+    sharpness,
   } = cap;
 
   // 調整バーのスライダー表示値（ハードウェア制御と補正で単位が違うため分ける）。
@@ -1035,6 +1200,22 @@ export function CaptureControls({
         value: digitalZoom,
         label: `${digitalZoom.toFixed(1)}倍`,
       };
+  const focusDistanceSlider = focusDistanceRange
+    ? {
+        min: focusDistanceRange.min,
+        max: focusDistanceRange.max,
+        step:
+          focusDistanceRange.step ??
+          (focusDistanceRange.max - focusDistanceRange.min) / 100,
+        value: hwFocusDistance ?? focusDistanceRange.min,
+        label: `${Math.round((hwFocusDistance ?? focusDistanceRange.min) * 100) / 100}`,
+      }
+    : null;
+  /** 合い具合バーの伸び（カメラ開始後の最大値を100%とした相対表示）。 */
+  const sharpnessPct =
+    sharpness && sharpness.max > 0
+      ? Math.min(100, (sharpness.value / sharpness.max) * 100)
+      : 0;
   /** ソフトウェア補正（明るさ・デジタルズーム）が効いているか。動画には反映されない。 */
   const softwareCorrectionActive =
     (brightnessMode === "sw" && brightnessPct !== 100) ||
@@ -1205,6 +1386,102 @@ export function CaptureControls({
                     ズームを戻す
                   </button>
                 </div>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <p className="flex items-center gap-2 text-base font-medium text-[var(--text)]">
+                  {hasHwFocus ? "フォーカス（ピント）" : "ピントの合い具合"}
+                  <span className="rounded border border-[var(--border)] px-1.5 py-0.5 text-xs font-normal text-[var(--dim)]">
+                    {hasHwFocus ? "カメラ側" : "目安"}
+                  </span>
+                </p>
+
+                {hasSingleShotAf && (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      disabled={focusState === "working"}
+                      onClick={() => void runSingleShotAf()}
+                      className="min-h-14 rounded-[var(--radius)] bg-[var(--accent)] px-5 text-lg font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {focusState === "working"
+                        ? "ピントを合わせています…"
+                        : "オートフォーカス"}
+                    </button>
+                    {focusState === "done" && (
+                      <span
+                        aria-live="polite"
+                        className="text-base font-bold text-[var(--accent-strong)]"
+                      >
+                        ピントを合わせました
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {hasContinuousAf && (
+                  <button
+                    type="button"
+                    aria-pressed={continuousAf}
+                    onClick={() => setContinuousAf(!continuousAf)}
+                    className="min-h-14 self-start rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-5 text-lg font-medium text-[var(--text)]"
+                  >
+                    連続オートフォーカス：{continuousAf ? "オン" : "オフ"}
+                  </button>
+                )}
+
+                {focusDistanceSlider && (
+                  <div className="flex flex-col gap-1">
+                    <label
+                      htmlFor="cap-focus-distance"
+                      className="flex items-center gap-2 text-base font-medium text-[var(--text)]"
+                    >
+                      手動フォーカス
+                      <span className="ml-auto text-base font-bold">
+                        {focusDistanceSlider.label}
+                      </span>
+                    </label>
+                    <input
+                      id="cap-focus-distance"
+                      type="range"
+                      aria-label="手動フォーカス"
+                      className="min-h-11 w-full"
+                      style={{ accentColor: "var(--accent)" }}
+                      min={focusDistanceSlider.min}
+                      max={focusDistanceSlider.max}
+                      step={focusDistanceSlider.step}
+                      value={focusDistanceSlider.value}
+                      onChange={(e) =>
+                        setFocusDistanceValue(Number(e.target.value))
+                      }
+                    />
+                  </div>
+                )}
+
+                {!hasHwFocus && (
+                  <div className="flex flex-col gap-1">
+                    <div
+                      className="h-3 w-full overflow-hidden rounded bg-[var(--border)]"
+                      role="img"
+                      aria-label={`ピントの合い具合の目安：${sharpness ? Math.round(sharpness.value) : "計測中"}`}
+                    >
+                      <div
+                        className="h-full"
+                        style={{
+                          width: `${sharpnessPct}%`,
+                          background: "var(--accent)",
+                        }}
+                      />
+                    </div>
+                    <p className="text-sm leading-relaxed text-[var(--dim)]">
+                      現在の値：
+                      <span className="font-bold text-[var(--text)]">
+                        {sharpness ? Math.round(sharpness.value) : "―"}
+                      </span>
+                      （カメラ開始後の最大値を100%として表示）。このカメラはブラウザからピント調整ができないため、合い具合の目安だけを表示します。スコープのピントリングを回して、数値が一番大きくなるところに合わせてください。
+                    </p>
+                  </div>
+                )}
               </div>
 
               {softwareCorrectionActive && (
