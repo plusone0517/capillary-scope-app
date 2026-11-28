@@ -44,6 +44,7 @@ import {
 } from "firebase/firestore";
 import {
   deleteObject,
+  getBlob,
   getDownloadURL,
   ref as storageRef,
   uploadBytes,
@@ -183,6 +184,21 @@ export type TrialExportRow = {
 export type ImageInput = {
   dataBase64: string;
   mimeType: "image/jpeg" | "image/png";
+};
+
+/** AI候補提示（試作）の候補1件。Functions の analyzeImagePatterns の戻り値。 */
+export type AiPatternCandidate = {
+  /** 28種の正規コード（サーバー側で照合済み）。 */
+  code: string;
+  confidence: "high" | "medium" | "low";
+  /** そう見える理由（画像のどこがどう見えるか）。 */
+  reason: string;
+};
+
+export type AnalyzeImagePatternsResult = {
+  /** APIキーが未設定のときは false（エラーではなく未設定として扱う）。 */
+  configured: boolean;
+  candidates: AiPatternCandidate[];
 };
 
 export type VideoInput = {
@@ -434,6 +450,23 @@ function base64ToBytes(dataBase64: string): Uint8Array {
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== "string") {
+        reject(new Error("画像の読み込みに失敗しました"));
+        return;
+      }
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(new Error("画像の読み込みに失敗しました"));
+    reader.readAsDataURL(blob);
+  });
 }
 
 function newFileToken(): string {
@@ -1096,5 +1129,41 @@ export const api = {
     }
     rows.sort((a, b) => a.time - b.time);
     return { observations: rows.map(({ time: _time, ...rest }) => rest) };
+  },
+
+  /**
+   * AIによるパターン候補の提示（試作）。
+   * Functions の analyzeImagePatterns に画像だけを送る（氏名・ID 等は送らない）。
+   * AI は候補を出すだけで、選択の確定はスタッフが画面で行う。
+   * APIキー未設定のときは configured: false が返る（例外にはならない）。
+   */
+  async analyzeImagePatterns(args: {
+    image: ImageInput;
+  }): Promise<AnalyzeImagePatternsResult> {
+    const fn = httpsCallable<
+      { imageBase64: string; mimeType: string },
+      AnalyzeImagePatternsResult
+    >(functions, "analyzeImagePatterns");
+    const res = await fn({
+      imageBase64: args.image.dataBase64,
+      mimeType: args.image.mimeType,
+    });
+    return {
+      configured: Boolean(res.data?.configured),
+      candidates: Array.isArray(res.data?.candidates) ? res.data.candidates : [],
+    };
+  },
+
+  /**
+   * 保存済み画像（Storage）を AI 送信用の base64 に読み出す。
+   * 編集画面で「保存済みの主画像」を対象にするために使う。
+   */
+  async fetchStoredImageInput(storagePath: string): Promise<ImageInput> {
+    const blob = await getBlob(storageRef(storage, storagePath));
+    const dataBase64 = await blobToBase64(blob);
+    return {
+      dataBase64,
+      mimeType: blob.type === "image/png" ? "image/png" : "image/jpeg",
+    };
   },
 };

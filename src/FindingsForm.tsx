@@ -13,11 +13,16 @@ capillaryPatterns,
 type ClinicalFlagKey,
 } from "./patterns";
 import { PatternDiagram } from "./PatternDiagram";
+import { AutoMeasurePanel } from "./AutoMeasurePanel";
 import {
   gasTypes,
   interventionCategories,
   interventionTimings,
 } from "./trial";
+import type {
+  AiPatternCandidate,
+  AnalyzeImagePatternsResult,
+} from "./api";
 
 export type InterventionDraft = {
   category: string;
@@ -141,17 +146,42 @@ function ChipGroup<T extends string>({
   );
 }
 
+/** AI候補の確からしさの表示名。 */
+const aiConfidenceLabels: Record<AiPatternCandidate["confidence"], string> = {
+  high: "高",
+  medium: "中",
+  low: "低",
+};
+
 export function FindingsForm({
   value,
   onChange,
   autoSummary,
   trialMode = false,
+  aiImageAvailable = false,
+  onAskAi,
+  measureImageUrl = null,
+  calibrationUmPerPx = null,
 }: {
   value: FindingsState;
   onChange: (next: FindingsState) => void;
   autoSummary: string;
   /** 試験モードONのときだけ、試験情報（試験名・群・実施内容）の入力欄を出す。 */
   trialMode?: boolean;
+  /**
+   * AI候補提示（試作）の対象画像（この観察の主たる静止画1枚）があるか。
+   * 新規作成では編集中のドラフト画像、編集では保存済みの主画像を指す。
+   */
+  aiImageAvailable?: boolean;
+  /**
+   * AIに候補を聞く処理（親側で対象画像を用意して Functions を呼ぶ）。
+   * AI は候補を提示するだけで、選択状態はここでは変えない。
+   */
+  onAskAi?: () => Promise<AnalyzeImagePatternsResult>;
+  /** 自動計測（試作）の対象になる代表画像のURL。画像が無い場合は null。 */
+  measureImageUrl?: string | null;
+  /** 保存済みの較正値（μm/px）。自動計測パネルの初期値にする。 */
+  calibrationUmPerPx?: number | null;
 }) {
   const set = (patch: Partial<FindingsState>) => onChange({ ...value, ...patch });
 
@@ -194,6 +224,48 @@ export function FindingsForm({
         .getElementById(`pattern-tile-${code}`)
         ?.scrollIntoView({ behavior: "smooth", block: "center" });
     });
+  };
+
+  // AI候補提示（試作）の状態。候補は提示するだけで、選択はスタッフが
+  // 通常のタイル／候補リストの操作で確定する（自動では選択しない）。
+  const [aiStatus, setAiStatus] = useState<
+    "idle" | "loading" | "done" | "not-configured" | "error"
+  >("idle");
+  const [aiCandidates, setAiCandidates] = useState<AiPatternCandidate[]>([]);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const aiCandidateCodes = new Set(aiCandidates.map((c) => c.code));
+
+  const handleAskAi = async () => {
+    if (!onAskAi || aiStatus === "loading") return;
+    setAiStatus("loading");
+    setAiError(null);
+    try {
+      const res = await onAskAi();
+      if (!res.configured) {
+        setAiCandidates([]);
+        setAiStatus("not-configured");
+        return;
+      }
+      // サーバー側で正規コードへの照合は済んでいるが、表示側でも守る。
+      setAiCandidates(
+        res.candidates.filter((c) => capillaryPatternByCode[c.code]),
+      );
+      setAiStatus("done");
+    } catch (e) {
+      setAiStatus("error");
+      setAiError(
+        e instanceof Error
+          ? `候補を取得できませんでした：${e.message}`
+          : "候補を取得できませんでした。時間をおいてもう一度お試しください。",
+      );
+    }
+  };
+
+  // 候補リストの項目を押すと、通常のパターン選択と同じ選択/解除が働く。
+  // あわせて説明パネルも開く（タイルを押したときと同じ見え方にする）。
+  const handleCandidate = (code: string) => {
+    togglePattern(code);
+    setOpenCode(code);
   };
 
   // 説明パネル本体。グリッドの中で、開いたタイルの行末の直後に
@@ -348,6 +420,11 @@ export function FindingsForm({
             placeholder="例：8.5"
           />
         </label>
+        <AutoMeasurePanel
+          imageUrl={measureImageUrl}
+          savedCalibrationUmPerPx={calibrationUmPerPx}
+          onApplyDensity={(v) => set({ densityPerMm: v })}
+        />
         <ChipGroup
           legend="流れの印象"
           options={capillaryFlowImpressions}
@@ -411,6 +488,92 @@ export function FindingsForm({
           選択中：{value.patterns.length}件。パターンは断定ではなく「最も近い形」として記録します。タイルを押すと、その場で説明が開きます。
         </p>
 
+        {onAskAi && (
+          <div className="flex flex-col gap-2 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--paper)] p-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                disabled={!aiImageAvailable || aiStatus === "loading"}
+                onClick={handleAskAi}
+                className="min-h-14 rounded-[var(--radius)] border-2 border-[var(--accent)] bg-[var(--surface)] px-5 text-lg font-bold text-[var(--accent-strong)] disabled:opacity-40"
+              >
+                {aiStatus === "loading"
+                  ? "AIに聞いています…"
+                  : "AIに候補を聞く（試作）"}
+              </button>
+              {!aiImageAvailable && (
+                <p className="text-base text-[var(--dim)]">
+                  画像がまだないため使えません。撮影するか、画像を追加すると使えます。
+                </p>
+              )}
+            </div>
+            <p className="text-sm leading-relaxed text-[var(--dim)]">
+              候補はAIの提示です。最終的な選択はスタッフが行います。送信するのは画像のみです。
+            </p>
+            {aiStatus === "not-configured" && (
+              <p className="text-base text-[var(--text)]">
+                AI解析はまだ設定されていません。
+              </p>
+            )}
+            {aiStatus === "error" && aiError && (
+              <p role="alert" className="text-base font-medium text-[var(--alert)]">
+                {aiError}
+              </p>
+            )}
+            {aiStatus === "done" && aiCandidates.length === 0 && (
+              <p className="text-base text-[var(--text)]">
+                AIから候補は提示されませんでした。実写と見比べて選んでください。
+              </p>
+            )}
+            {aiCandidates.length > 0 && (
+              <ul className="flex flex-col gap-2" aria-label="AIの候補">
+                {aiCandidates.map((candidate) => {
+                  const p = capillaryPatternByCode[candidate.code];
+                  if (!p) return null;
+                  const selected = value.patterns.includes(candidate.code);
+                  return (
+                    <li key={candidate.code}>
+                      <button
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => handleCandidate(candidate.code)}
+                        className={`flex min-h-14 w-full flex-col gap-1 rounded-[var(--radius)] border-2 p-3 text-left ${
+                          selected
+                            ? "border-[var(--accent)] bg-[var(--accent-bg)]"
+                            : "border-[var(--accent)] bg-[var(--surface)]"
+                        }`}
+                      >
+                        <span className="flex flex-wrap items-center gap-2 text-lg font-bold text-[var(--text)]">
+                          {p.name}
+                          <span className="rounded-full bg-[var(--accent)] px-2 py-0.5 text-sm font-bold text-white">
+                            AI候補
+                          </span>
+                          <span className="rounded-full border border-[var(--border-strong)] px-2 py-0.5 text-sm font-bold text-[var(--accent-strong)]">
+                            確からしさ：{aiConfidenceLabels[candidate.confidence]}
+                          </span>
+                          {selected && (
+                            <span className="rounded-full bg-[var(--accent)] px-2 py-0.5 text-sm font-bold text-white">
+                              選択中
+                            </span>
+                          )}
+                        </span>
+                        {candidate.reason && (
+                          <span className="text-base leading-relaxed text-[var(--dim)]">
+                            {candidate.reason}
+                          </span>
+                        )}
+                        <span className="text-sm text-[var(--dim)]">
+                          押すと選択／解除できます。
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        )}
+
         {value.patterns.length > 0 && (
           <div className="flex flex-wrap gap-2" aria-label="選択中のパターン">
             {value.patterns.map((code) => {
@@ -446,6 +609,7 @@ export function FindingsForm({
           {capillaryPatterns.flatMap((pattern, index) => {
             const selected = value.patterns.includes(pattern.code);
             const focused = openPattern?.code === pattern.code;
+            const isAiCandidate = aiCandidateCodes.has(pattern.code);
             const tile = (
               <button
                 key={pattern.code}
@@ -456,9 +620,11 @@ export function FindingsForm({
                 className={`relative flex min-h-14 flex-col gap-2 rounded-[var(--radius)] border-2 p-3 text-left ${
                   selected
                     ? "border-[var(--accent)] bg-[var(--accent-bg)]"
-                    : focused
-                      ? "border-[var(--border-strong)] bg-[var(--surface)]"
-                      : "border-[var(--border)] bg-[var(--surface)]"
+                    : isAiCandidate
+                      ? "border-dashed border-[var(--accent)] bg-[var(--surface)]"
+                      : focused
+                        ? "border-[var(--border-strong)] bg-[var(--surface)]"
+                        : "border-[var(--border)] bg-[var(--surface)]"
                 }`}
               >
                 {pattern.clinical && (
@@ -486,6 +652,11 @@ export function FindingsForm({
                 <span className="text-base font-bold leading-snug text-[var(--text)] sm:text-lg">
                   {pattern.name}
                 </span>
+                {isAiCandidate && (
+                  <span className="self-start rounded-full bg-[var(--accent)] px-2 py-0.5 text-sm font-bold text-white">
+                    AI候補
+                  </span>
+                )}
               </button>
             );
             // 開いたタイルの行の末尾の直後に、説明パネルを差し込む。

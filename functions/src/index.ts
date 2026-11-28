@@ -35,7 +35,9 @@
 import { initializeApp} from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp} from "firebase-admin/firestore";
 import { onCall, HttpsError} from "firebase-functions/v2/https";
+import { defineSecret } from "firebase-functions/params";
 import { createHash, randomBytes} from "node:crypto";
+import { PATTERN_SUMMARIES, PATTERN_CODE_SET } from "./patterns";
 
 initializeApp();
 
@@ -237,4 +239,191 @@ detail: `memberId=${memberId} reportId=${reportId}`,
 // バケットから読み取り、会員本人の領域へ書き込む（バケット間コピー）。
 return payload;
 },
+);
+
+/* ================= AIによるパターン候補の提示（試作） ================= */
+
+/**
+ * OpenAI API キー（Secret Manager）。デプロイ時に
+ * `firebase functions:secrets:set OPENAI_API_KEY` で設定する。
+ * 未設定のときは analyzeImagePatterns が { configured: false } を返す
+ * （呼び出し自体は失敗させない）。
+ */
+const openAiApiKey = defineSecret("OPENAI_API_KEY");
+
+/** 画像 base64 の上限（文字数）。約6MBの画像に相当する。 */
+const MAX_IMAGE_BASE64_LENGTH = 8 * 1024 * 1024;
+/** 候補の最大件数。 */
+const MAX_CANDIDATES = 4;
+/** 理由文の最大文字数（応答が長くなりすぎた場合の切り捨て）。 */
+const MAX_REASON_LENGTH = 300;
+
+type AiConfidence = "high" | "medium" | "low";
+
+interface AnalyzeImageRequest {
+  /** 画像の base64（data URL の接頭辞なし）。 */
+  imageBase64: string;
+  /** 省略時は image/jpeg として扱う。 */
+  mimeType?: string;
+}
+
+interface AiPatternCandidate {
+  code: string;
+  confidence: AiConfidence;
+  reason: string;
+}
+
+interface AnalyzeImageResult {
+  /** APIキーが設定済みかどうか。false のとき candidates は空。 */
+  configured: boolean;
+  candidates: AiPatternCandidate[];
+}
+
+function buildAnalysisPrompt(): string {
+  const list = PATTERN_SUMMARIES.map(
+    (p) => `- ${p.code}（${p.name}）: ${p.feature}`,
+  ).join("\n");
+  return [
+    "次は爪郭毛細血管の観察パターンの一覧です（コード（名前）: 形の特徴）。",
+    list,
+    "",
+    "添付した爪郭毛細血管の撮影画像を見て、この一覧の中で画像に最も近い形の候補を最大4件まで挙げてください。",
+    "候補がない場合は、無理に選ばず空にしてください。",
+    "各候補には、確からしさ（high / medium / low のいずれか）と、そう見える理由（画像のどこがどう見えるか）を付けてください。",
+    "これは診断ではありません。病名の断定や、疾患がある・ないの判断はしないでください。「最も近い形」の候補提示だけを行ってください。",
+    '出力は次の形式の JSON のみとしてください: {"candidates": [{"code": "コード", "confidence": "high", "reason": "理由"}]}',
+  ].join("\n");
+}
+
+/**
+ * AIによるパターン候補の提示（試作）。
+ * - スタッフ認証が必須（requireActiveStaff。未ログインは拒否）。
+ * - 送信するのは画像だけ。氏名・ID 等の情報は入力に含めない。
+ * - AI は候補を提示するだけで、選択の確定はスタッフがクライアント側で行う。
+ * - APIキー未設定のときはエラーを投げず { configured: false } を返す。
+ */
+export const analyzeImagePatterns = onCall<
+  AnalyzeImageRequest,
+  Promise<AnalyzeImageResult>
+>(
+  { region: REGION, secrets: [openAiApiKey], timeoutSeconds: 120 },
+  async (request) => {
+    await requireActiveStaff(request.auth?.uid);
+
+    const imageBase64 = request.data?.imageBase64;
+    if (typeof imageBase64 !== "string" || imageBase64.length === 0) {
+      throw new HttpsError("invalid-argument", "画像が必要です。");
+    }
+    if (imageBase64.length > MAX_IMAGE_BASE64_LENGTH) {
+      throw new HttpsError("invalid-argument", "画像が大きすぎます。");
+    }
+    const mimeType = request.data?.mimeType ?? "image/jpeg";
+    if (mimeType !== "image/jpeg" && mimeType !== "image/png") {
+      throw new HttpsError(
+        "invalid-argument",
+        "画像の形式は JPEG か PNG にしてください。",
+      );
+    }
+
+    let apiKey = "";
+    try {
+      apiKey = openAiApiKey.value();
+    } catch {
+      apiKey = "";
+    }
+    if (!apiKey) {
+      return { configured: false, candidates: [] };
+    }
+
+    const model = process.env.OPENAI_VISION_MODEL || "gpt-4o";
+
+    let response: Response;
+    try {
+      response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0.2,
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "system",
+              content:
+                "あなたは爪郭毛細血管の観察を補助するアシスタントです。診断や病名の断定は行わず、決められたパターン一覧の中から「最も近い形」の候補を提示するだけです。",
+            },
+            {
+              role: "user",
+              content: [
+                { type: "text", text: buildAnalysisPrompt() },
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: `data:${mimeType};base64,${imageBase64}`,
+                  },
+                },
+              ],
+            },
+          ],
+        }),
+      });
+    } catch {
+      throw new HttpsError(
+        "internal",
+        "AI解析に失敗しました。時間をおいてもう一度お試しください。",
+      );
+    }
+    if (!response.ok) {
+      throw new HttpsError(
+        "internal",
+        "AI解析に失敗しました。時間をおいてもう一度お試しください。",
+      );
+    }
+
+    const data = (await response.json()) as {
+      choices?: { message?: { content?: string } }[];
+    };
+    const content = data.choices?.[0]?.message?.content;
+    if (typeof content !== "string") {
+      throw new HttpsError("internal", "AIの応答を読み取れませんでした。");
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      throw new HttpsError("internal", "AIの応答を読み取れませんでした。");
+    }
+    const rawCandidates = (parsed as { candidates?: unknown }).candidates;
+    if (!Array.isArray(rawCandidates)) {
+      throw new HttpsError("internal", "AIの応答を読み取れませんでした。");
+    }
+
+    // 28種の正規コードと照合し、不正なコード・重複は捨てる。
+    const candidates: AiPatternCandidate[] = [];
+    for (const raw of rawCandidates) {
+      if (candidates.length >= MAX_CANDIDATES) break;
+      if (typeof raw !== "object" || raw === null) continue;
+      const { code, confidence, reason } = raw as Record<string, unknown>;
+      if (typeof code !== "string" || !PATTERN_CODE_SET.has(code)) continue;
+      if (candidates.some((c) => c.code === code)) continue;
+      candidates.push({
+        code,
+        confidence:
+          confidence === "high" ||
+          confidence === "medium" ||
+          confidence === "low"
+            ? confidence
+            : "low",
+        reason:
+          typeof reason === "string"
+            ? reason.slice(0, MAX_REASON_LENGTH)
+            : "",
+      });
+    }
+
+    return { configured: true, candidates };
+  },
 );
