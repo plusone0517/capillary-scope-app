@@ -1050,7 +1050,9 @@ export const api = {
 
   async getSubjectHistory(args: {
     id: string;
-  }): Promise<{ observations: { id: string; observedAt: string; status: string }[] }> {
+  }): Promise<{
+    observations: { id: string; observedAt: string; status: string; densityPerMm: number | null }[];
+  }> {
     const snap = await getDoc(doc(db, "observations", args.id));
     if (!snap.exists()) return { observations: [] };
     const me = snap.data() as Observation;
@@ -1068,15 +1070,17 @@ export const api = {
           ? o.recordedAt.toDate().toISOString()
           : new Date().toISOString(),
         status: o.status,
+        densityPerMm: o.densityPerMm ?? null,
         time: o.recordedAt?.toMillis ? o.recordedAt.toMillis() : 0,
       };
     });
     list.sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
     return {
-      observations: list.map(({ id, observedAt, status }) => ({
+      observations: list.map(({ id, observedAt, status, densityPerMm }) => ({
         id,
         observedAt,
         status,
+        densityPerMm,
       })),
     };
   },

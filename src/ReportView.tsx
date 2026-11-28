@@ -1,6 +1,9 @@
-// レポート表示：観察画像・撮影と所見・一致した形のカード・まとめ・
-// アドバイス・次回についてを、正本サンプルSVGの構成で表示する。
-// 臨床フラグがある場合は受診案内を先頭に目立たせる。
+// レポート表示。どの回・どの人のレポートでも、項目と並びを同じにする（標準の並び）：
+//   受診案内（該当するときだけ、先頭）→ ①今回の観察画像（数えた位置つき）→ ②計測値と所見
+//   → ③本数の推移 → ④前回との比較 → ⑤一致した形 → ⑥所見のまとめ → ⑦アドバイス
+//   → ⑧次回について → ⑨撮影の条件
+// 記録の無い項目は、その項目だけを出さない（並びは変えない）。①②⑤⑨は必ず出す。
+// 数値の変化は事実の表示に留め、良し悪しの判定文は出さない。
 // 印刷時は #report-print だけがA4レイアウトで出る（theme.css の @media print）。
 
 import { useEffect, useState } from "react";
@@ -13,8 +16,12 @@ capillaryColorLabels,
 capillaryFingerLabels,
 capillaryFlowLabels,
 capillaryPatternByCode,
+patternNumberByCode,
 type ClinicalFlagKey,
 } from "./patterns";
+import { CountedImage } from "./CountedImage";
+import { TrendChart } from "./TrendChart";
+import type { TrendInput } from "./trend";
 import { PatternDiagram } from "./PatternDiagram";
 import { LogoMark } from "./Logo";
 import {
@@ -45,6 +52,26 @@ const DISCLAIMER =
   "このレポートは観察の記録と生活アドバイスです。診断は症状と検査を合わせて医療機関で行います。";
 
 /** 種データのダミーレポートかどうか（対象者名に「（ダミー）」を含む）。 */
+/**
+ * レポートを印刷する。文字の大きさは2通り：
+ * - large（既定）：お渡し用。文字を大きくして読みやすくする（複数ページになる）。
+ * - compact：控え用。文字を小さくして枚数を少なくする。
+ * 切り替えは html の data-print 属性で行い、大きさそのものは theme.css の @media print にある。
+ */
+export function printReport(size: "large" | "compact" = "large"): void {
+  document.documentElement.dataset.print = size;
+  window.print();
+}
+
+/** 本数（密度）の、レポートでの呼び方。 */
+const DENSITY_LABEL = "本数（1mmあたり）";
+
+const CALIBRATION_LABELS: Record<string, string> = {
+  auto_scale: "自動で読み取り",
+  manual: "画像の上で合わせた値",
+  saved: "前に合わせた値",
+};
+
 export function isDummySubject(subjectName: string): boolean {
   return subjectName.includes("（ダミー）");
 }
@@ -54,6 +81,13 @@ export function formatDateTime(iso: string): string {
   if (Number.isNaN(d.getTime())) return iso;
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** 日付だけ（比較の図の説明など、短く出したいところ用）。 */
+export function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
 export function activeFlags(obs: Observation): ClinicalFlagKey[] {
@@ -93,8 +127,11 @@ export function ReportBody({
   prev,
   qrDataUrl,
   trialMode = false,
+  history,
 }: {
   obs: Observation;
+  /** 同じ顧客の、この回までの本数の記録（推移グラフ用）。2回分以上あるときだけグラフを出す。 */
+  history?: TrendInput[];
   /** 同じ対象者の直前の観察（ビフォアアフター比較欄用）。なければ欄ごと出さない。 */
   prev?: Observation | null;
   qrDataUrl?: string | null;
@@ -112,7 +149,7 @@ export function ReportBody({
   const compareRows: { label: string; value: string }[] = [];
   if (prev && prevPd) {
     compareRows.push({
-      label: "密度",
+      label: DENSITY_LABEL,
       value:
         prev.densityPerMm != null && obs.densityPerMm != null
           ? `${formatDensity(prev.densityPerMm)} → ${formatDensity(obs.densityPerMm)}（${formatSigned(obs.densityPerMm - prev.densityPerMm, 1)} 本）`
@@ -172,58 +209,66 @@ export function ReportBody({
     }
   }
 
-  const findings: { label: string; value: string }[] = [
-    { label: "撮影した指", value: capillaryFingerLabels[obs.finger] ?? obs.finger },
-  ];
-  if (obs.roomTempC != null) findings.push({ label: "室温", value: `${obs.roomTempC}℃` });
-  if (obs.restMinutes != null)
-    findings.push({ label: "安静時間", value: `${obs.restMinutes}分` });
-  findings.push({
-    label: "撮影前の制限の確認",
-    value: obs.restrictionsOk ? "確認済み" : "未確認",
-  });
-  if (obs.densityPerMm != null)
-    findings.push({ label: "密度", value: `${obs.densityPerMm} 本/mm` });
-  if (obs.flow) findings.push({ label: "流れの印象", value: capillaryFlowLabels[obs.flow] ?? obs.flow });
+  // ②計測値と所見：数値は大きく、印象は一覧で。
+  const measurement =
+    obs.densityMeasurement && obs.densityMeasurement.densityPerMm === obs.densityPerMm
+      ? obs.densityMeasurement
+      : null;
+  const impressions: { label: string; value: string }[] = [];
+  if (obs.flow)
+    impressions.push({ label: "流れの印象", value: capillaryFlowLabels[obs.flow] ?? obs.flow });
   if (obs.color)
-    findings.push({ label: "色の印象", value: capillaryColorLabels[obs.color] ?? obs.color });
+    impressions.push({ label: "色の印象", value: capillaryColorLabels[obs.color] ?? obs.color });
   if (obs.changeVsPrev)
-    findings.push({
+    impressions.push({
       label: "前回比較",
       value: capillaryChangeLabels[obs.changeVsPrev] ?? obs.changeVsPrev,
     });
-  if (obs.flowSpeedPxPerSec != null)
-    findings.push({
-      label: "血流速度（試作・参考値）",
-      value:
-        obs.flowSpeedMmPerSec != null
-          ? `${obs.flowSpeedMmPerSec.toFixed(2)} mm/秒`
-          : `${obs.flowSpeedPxPerSec.toFixed(1)} ピクセル/秒（校正値なし）`,
+
+  // ③本数の推移：本数の記録が2回分以上あるときだけ出す。
+  const trendRows = (history ?? []).filter((r) => r.value != null);
+  const showTrend = trendRows.length >= 2;
+
+  // ⑨撮影の条件：比べるときの前提になる記録。
+  const conditions: { label: string; value: string }[] = [
+    { label: "撮影した指", value: capillaryFingerLabels[obs.finger] ?? obs.finger },
+  ];
+  if (obs.roomTempC != null) conditions.push({ label: "室温", value: `${obs.roomTempC}℃` });
+  if (obs.restMinutes != null)
+    conditions.push({ label: "安静時間", value: `${obs.restMinutes}分` });
+  conditions.push({
+    label: "撮影前の制限の確認",
+    value: obs.restrictionsOk ? "確認済み" : "未確認",
+  });
+  if (measurement)
+    conditions.push({
+      label: "目盛り",
+      value: `${CALIBRATION_LABELS[measurement.calibrationSource ?? "manual"]}（${measurement.umPerPx.toFixed(2)} μm/px）`,
     });
-  if (obs.calibrationUmPerPx != null)
-    findings.push({
-      label: "校正値",
-      value: `${obs.calibrationUmPerPx} μm/px`,
-    });
+  else if (obs.calibrationUmPerPx != null)
+    conditions.push({ label: "校正値", value: `${obs.calibrationUmPerPx} μm/px` });
   if (trialMode && obs.trialName)
-    findings.push({ label: "試験名", value: obs.trialName });
+    conditions.push({ label: "試験名", value: obs.trialName });
   if (trialMode && obs.trialGroup)
-    findings.push({ label: "群", value: obs.trialGroup });
+    conditions.push({ label: "群", value: obs.trialGroup });
 
   return (
     <div id="report-print" className="bg-[var(--surface)]">
       <div className="bg-[var(--paper)] px-5 py-4 sm:px-7">
-        <div className="flex items-start gap-3">
+        <div className="r-head flex items-start gap-3">
           <LogoMark size={46} className="mt-1 shrink-0" />
           <div className="min-w-0 flex-1">
             <h1 className="r-title">毛細血管観察レポート</h1>
-            <p className="r-meta mt-1">
-              観察日：{formatDateTime(obs.observedAt)}　対象：{obs.subjectName} 様
-              {obs.customer?.memberNumber && `　会員番号：${obs.customer.memberNumber}`}
-              {obs.subjectId ? `（ID：${obs.subjectId}）` : ""}
+            {/* 項目の途中で折り返さないよう、項目ごとにまとめる。 */}
+            <p className="r-meta mt-1 flex flex-wrap gap-x-5">
+              <span>観察日：{formatDateTime(obs.observedAt)}</span>
+              <span>
+                対象：{obs.subjectName} 様{obs.subjectId ? `（ID：${obs.subjectId}）` : ""}
+              </span>
+              {obs.customer?.memberNumber && <span>会員番号：{obs.customer.memberNumber}</span>}
             </p>
           </div>
-          <p className="r-src shrink-0 pt-2 text-right">
+          <p className="r-src r-issuer shrink-0 pt-2 text-right">
             毛細血管 観察・記録システム
             <br />
             メディプロ医薬
@@ -261,13 +306,14 @@ export function ReportBody({
         </h2>
         {primary ? (
           <div className="flex flex-col gap-3">
-            <img
-              src={primary.url}
-              alt="代表の観察画像"
-              className="w-full rounded-[var(--radius)] object-cover"
-            />
+            <CountedImage src={primary.url} alt="代表の観察画像" measurement={measurement} />
+            {measurement && (
+              <p className="r-small">
+                番号の点：白い線（{measurement.lengthMm.toFixed(2)} mm）の範囲で数えた先端
+              </p>
+            )}
             {others.length > 0 && (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="no-print grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {others.map((img, i) => (
                   <img
                     key={img.id}
@@ -299,23 +345,62 @@ export function ReportBody({
           </div>
         )}
 
-        <h2 className="r-sec">撮影と所見</h2>
-        <dl className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
-          {findings.map((f) => (
-            <div key={f.label} className="flex items-baseline gap-2">
-              <dt className="r-small shrink-0 font-bold">{f.label}：</dt>
-              <dd
-                className={
-                  f.label === "密度" || f.label.startsWith("血流速度")
-                    ? "r-num"
-                    : "r-small"
-                }
-              >
-                {f.value}
-              </dd>
+        <h2 className="r-sec">計測値と所見</h2>
+        <div className={`r-keep grid gap-3 ${obs.flowSpeedPxPerSec != null ? "sm:grid-cols-2" : ""}`}>
+          <div className="r-card">
+            <p className="r-small font-bold">{DENSITY_LABEL}</p>
+            {obs.densityPerMm != null ? (
+              <p>
+                <span className="r-big">{obs.densityPerMm}</span>
+                <span className="r-num"> 本/mm</span>
+              </p>
+            ) : (
+              <p className="r-small">記録なし</p>
+            )}
+            {measurement && (
+              <p className="r-small">
+                数えた本数 {measurement.count}本／範囲 {measurement.lengthMm.toFixed(2)} mm
+              </p>
+            )}
+            {prev && prev.densityPerMm != null && obs.densityPerMm != null && (
+              <p className="r-small">
+                前回 {prev.densityPerMm} 本/mm（{formatSigned(obs.densityPerMm - prev.densityPerMm, 1)} 本）
+              </p>
+            )}
+          </div>
+          {obs.flowSpeedPxPerSec != null && (
+            <div className="r-card">
+              <p className="r-small font-bold">血流速度（試作・参考値）</p>
+              {obs.flowSpeedMmPerSec != null ? (
+                <p>
+                  <span className="r-big">{obs.flowSpeedMmPerSec.toFixed(2)}</span>
+                  <span className="r-num"> mm/秒</span>
+                </p>
+              ) : (
+                <p>
+                  <span className="r-big">{obs.flowSpeedPxPerSec.toFixed(1)}</span>
+                  <span className="r-num"> ピクセル/秒</span>
+                </p>
+              )}
+              {prev && prev.flowSpeedMmPerSec != null && obs.flowSpeedMmPerSec != null && (
+                <p className="r-small">
+                  前回 {prev.flowSpeedMmPerSec.toFixed(2)} mm/秒（
+                  {formatSigned(obs.flowSpeedMmPerSec - prev.flowSpeedMmPerSec, 2)} mm/秒）
+                </p>
+              )}
             </div>
-          ))}
-        </dl>
+          )}
+        </div>
+        {impressions.length > 0 && (
+          <dl className="mt-3 grid gap-x-6 gap-y-1 sm:grid-cols-2">
+            {impressions.map((f) => (
+              <div key={f.label} className="flex items-baseline gap-2">
+                <dt className="r-small shrink-0 font-bold">{f.label}：</dt>
+                <dd className="r-small">{f.value}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
         {flags.length > 0 ? (
           <p className="r-small mt-2 font-bold text-[var(--alert)]">
             臨床フラグ：{flags.map((f) => capillaryClinicalFlagLabels[f]).join("、")}
@@ -324,21 +409,11 @@ export function ReportBody({
           <p className="r-small mt-2">臨床フラグ：なし</p>
         )}
 
-        {trialMode && obs.interventions.length > 0 && (
-          <>
-            <h2 className="r-sec">実施内容の記録</h2>
-            <ul className="flex flex-col gap-1">
-              {obs.interventions.map((iv) => (
-                <li key={iv.id} className="r-small">
-                  {interventionLine(iv)}（タイミング：
-                  {interventionTimingLabels[iv.timing] ?? iv.timing}）
-                </li>
-              ))}
-            </ul>
-            <p className="r-small mt-1">
-              実施内容は記録として記載しています。変化との関係は、この記録だけでは判断できません。
-            </p>
-          </>
+        {showTrend && (
+          <div className="r-keep">
+            <h2 className="r-sec">本数の推移</h2>
+            <TrendChart rows={trendRows} highlightId={obs.id} latestLabel="今回" large />
+          </div>
         )}
 
         {prev && (
@@ -354,7 +429,7 @@ export function ReportBody({
                     <img
                       src={side.img.url}
                       alt={`${side.label}の代表画像`}
-                      className="aspect-[4/3] w-full rounded-[var(--radius)] object-cover"
+                      className="r-compare-img aspect-[4/3] w-full rounded-[var(--radius)] object-cover"
                     />
                   ) : (
                     <span className="flex aspect-[4/3] w-full items-center justify-center rounded-[var(--radius)] bg-[var(--paper)] text-sm text-[var(--dim)]">
@@ -362,7 +437,7 @@ export function ReportBody({
                     </span>
                   )}
                   <figcaption className="r-small">
-                    {side.label}：{formatDateTime(side.o.observedAt)}
+                    {side.label}：{formatDate(side.o.observedAt)}
                   </figcaption>
                 </figure>
               ))}
@@ -382,7 +457,7 @@ export function ReportBody({
                   <dt className="r-small shrink-0 font-bold">{row.label}：</dt>
                   <dd
                     className={
-                      row.label === "密度" || row.label.startsWith("血流速度")
+                      row.label === DENSITY_LABEL || row.label.startsWith("血流速度")
                         ? "r-num"
                         : "r-small"
                     }
@@ -404,18 +479,18 @@ export function ReportBody({
               return (
                 <article
                   key={code}
-                  className="rounded-[var(--radius)] border border-[var(--border)]"
+                  className="r-keep rounded-[var(--radius)] border border-[var(--border)]"
                 >
-                  <h3 className="bg-[var(--accent)] px-4 py-2 text-lg font-bold text-white">
-                    {pattern.name}
+                  <h3 className="r-pattern bg-[var(--accent)] px-4 py-2 text-lg font-bold text-white">
+                    No.{patternNumberByCode[code] ?? "―"} {pattern.name}
                   </h3>
-                  <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row">
+                  <div className="r-pattern-body flex flex-col gap-3 px-4 py-3 sm:flex-row">
                     <PatternDiagram
                       code={code}
                       title={`${pattern.name}の模式図`}
-                      className="h-28 w-full shrink-0 rounded border border-[var(--border)] sm:w-52"
+                      className="r-pattern-fig h-28 w-full shrink-0 rounded border border-[var(--border)] sm:w-52"
                     />
-                    <div className="flex flex-col gap-1">
+                    <div className="r-pattern-text flex flex-col gap-1">
                       <p className="r-small">{pattern.feature}</p>
                       <p className="r-why">原因：{pattern.why}</p>
                       <p className="r-small">重なりやすい症状：{pattern.symptoms}</p>
@@ -451,8 +526,37 @@ export function ReportBody({
           </>
         )}
 
+        <div className="r-keep">
+          <h2 className="r-sec">撮影の条件</h2>
+          <dl className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
+            {conditions.map((f) => (
+              <div key={f.label} className="flex items-baseline gap-2">
+                <dt className="r-small shrink-0 font-bold">{f.label}：</dt>
+                <dd className="r-small">{f.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+
+        {trialMode && obs.interventions.length > 0 && (
+          <>
+            <h2 className="r-sec">実施内容の記録</h2>
+            <ul className="flex flex-col gap-1">
+              {obs.interventions.map((iv) => (
+                <li key={iv.id} className="r-small">
+                  {interventionLine(iv)}（タイミング：
+                  {interventionTimingLabels[iv.timing] ?? iv.timing}）
+                </li>
+              ))}
+            </ul>
+            <p className="r-small mt-1">
+              実施内容は記録として記載しています。変化との関係は、この記録だけでは判断できません。
+            </p>
+          </>
+        )}
+
         {qrDataUrl && (
-          <div className="mt-8 flex items-center gap-4 border-t border-[var(--border)] pt-4">
+          <div className="r-keep mt-8 flex items-center gap-4 border-t border-[var(--border)] pt-4">
             <img
               src={qrDataUrl}
               alt="受け取りQRコード"
@@ -502,7 +606,7 @@ export function ReceiveQr({
       </p>
       <button
         type="button"
-        onClick={() => window.print()}
+        onClick={() => printReport("large")}
         className="min-h-14 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-5 text-lg font-medium text-[var(--text)]"
       >
         レポートと一緒に印刷する

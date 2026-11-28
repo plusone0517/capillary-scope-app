@@ -40,17 +40,12 @@ import {
   type AggregatedCandidate,
   type AnalyzedImageInput,
 } from "./aiAnalysis";
-import { capillaryPatternByCode, capillaryPatterns } from "./patterns";
+import { capillaryPatternByCode, capillaryPatterns, patternNumberByCode } from "./patterns";
 
 /** この画面から遷移できる行き先だけに絞った遷移関数。 */
 type SimpleGo = (
   v: { kind: "list" } | { kind: "report"; id: string },
 ) => void;
-
-/** パターンの番号（定義順の 1〜28）。「No.」表示に使う。 */
-const patternNumberByCode: Record<string, number> = Object.fromEntries(
-  capillaryPatterns.map((p, i) => [p.code, i + 1]),
-);
 
 const confidenceLabels: Record<AiPatternCandidate["confidence"], string> = {
   high: "高",

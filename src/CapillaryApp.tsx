@@ -28,6 +28,7 @@ import { FindingsForm, emptyFindings, type FindingsState } from "./FindingsForm"
 import {
 ReceiveQr,
 ReportBody,
+printReport,
 formatDateTime,
 isDummySubject,
 useQrDataUrl,
@@ -993,13 +994,22 @@ function ReportScreen({
           </button>
         )}
         {obs.status !== "finalized" && (
-          <button
-            type="button"
-            onClick={() => window.print()}
-            className="min-h-14 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-5 text-lg text-[var(--text)]"
-          >
-            印刷する（A4）
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={() => printReport("large")}
+              className="min-h-14 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-5 text-lg text-[var(--text)]"
+            >
+              印刷する（大きな文字）
+            </button>
+            <button
+              type="button"
+              onClick={() => printReport("compact")}
+              className="min-h-14 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-5 text-lg text-[var(--text)]"
+            >
+              印刷する（枚数を少なく）
+            </button>
+          </>
         )}
         {/* 主要アクションは1つだけを右端に大きく置く。
             未確定なら「確定」、確定済みなら「印刷」が主要になる。 */}
@@ -1019,10 +1029,17 @@ function ReportScreen({
             </span>
             <button
               type="button"
-              onClick={() => window.print()}
+              onClick={() => printReport("compact")}
+              className="min-h-16 rounded-[var(--radius)] border-2 border-[var(--accent)] bg-[var(--surface)] px-5 text-lg font-bold text-[var(--accent-strong)]"
+            >
+              印刷する（枚数を少なく）
+            </button>
+            <button
+              type="button"
+              onClick={() => printReport("large")}
               className="min-h-16 rounded-[var(--radius)] bg-[var(--accent)] px-7 text-xl font-bold text-white"
             >
-              印刷する（A4）
+              印刷する（大きな文字）
             </button>
           </span>
         )}
@@ -1061,6 +1078,9 @@ function ReportScreen({
         <ReportBody
           obs={obs}
           prev={prevObs}
+          history={(history.data?.observations ?? [])
+            .filter((o) => o.observedAt <= obs.observedAt)
+            .map((o) => ({ id: o.id, observedAt: o.observedAt, value: o.densityPerMm }))}
           qrDataUrl={obs.status === "finalized" ? qrDataUrl : null}
           trialMode={mode === "research"}
         />

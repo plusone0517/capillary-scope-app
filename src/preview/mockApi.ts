@@ -4,6 +4,7 @@
 // サンプルの対象者・画像はすべて架空のもの。
 import type { api as RealApi, ObservationRecord, ObservationListItem, ImageInput } from "../api";
 import { normalizeConsent, UNCONFIRMED_CONSENT } from "../consent";
+import type { DensityMeasurement } from "../densityCount";
 import {
   findDuplicate,
   matchesCustomer,
@@ -34,6 +35,44 @@ function sampleImage(variant: number): string {
   }
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#d9c6d6"/><stop offset="1" stop-color="#b9a9c9"/></linearGradient></defs><rect width="800" height="450" fill="url(#g)"/>${paths}</svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+/** sampleImage と同じ計算で、ループの先端の位置（800×450 の中のピクセル）を出す。 */
+function sampleTips(variant: number): { x: number; y: number }[] {
+  const loops = 9 + (variant % 4);
+  const tips: { x: number; y: number }[] = [];
+  for (let i = 0; i < loops; i++) {
+    const x = 60 + (i * 680) / loops + ((i * 37 + variant * 13) % 17);
+    const h = 150 + ((i * 53 + variant * 29) % 90);
+    const w = 16 + ((i * 7 + variant) % 8);
+    tips.push({ x: x + w / 2, y: 330 - h + 2 });
+  }
+  return tips;
+}
+
+/** 架空の画像に合わせた「数えた記録」（レポートの重ね表示を確かめるため）。 */
+function sampleMeasurement(variant: number): DensityMeasurement {
+  const W = 800;
+  const H = 450;
+  const umPerPx = 1000 / 367; // 1mm = 367ピクセル
+  const tips = sampleTips(variant);
+  const y = Math.min(...tips.map((t) => t.y)) - 16;
+  const line = { start: { x: W / 2 - 183.5, y }, end: { x: W / 2 + 183.5, y } };
+  const points = tips.filter((t) => t.x >= line.start.x && t.x <= line.end.x);
+  const rel = (q: { x: number; y: number }) => ({ x: q.x / W, y: q.y / H });
+  return {
+    method: "manual_tap",
+    points: points.map(rel),
+    line: { start: rel(line.start), end: rel(line.end) },
+    umPerPx,
+    calibrationSource: "auto_scale",
+    imageWidthPx: W,
+    imageHeightPx: H,
+    lengthMm: 1,
+    count: points.length,
+    densityPerMm: points.length,
+    proposal: { version: "tips-sample", points: tips.map(rel) },
+  };
 }
 
 let seq = 100;
@@ -116,7 +155,8 @@ const store: ObservationRecord[] = [
     roomTempC: 23,
     restMinutes: 15,
     restrictionsOk: true,
-    densityPerMm: 8.5,
+    densityPerMm: sampleMeasurement(3).densityPerMm,
+    densityMeasurement: sampleMeasurement(3),
     flow: "good",
     color: "bright_red",
     patterns: ["normal", "tortuous"],
@@ -299,8 +339,14 @@ export const api: typeof RealApi = {
     return {
       observations: store
         .filter((o) => o.patientId === me.patientId)
-        .sort((a, b) => b.observedAt.localeCompare(a.observedAt))
-        .map((o) => ({ id: o.id, observedAt: o.observedAt, status: o.status })),
+        // 本番のデータ層と同じく、古い順に返す（直前の観察を探す処理がこの順を前提にしている）。
+        .sort((a, b) => a.observedAt.localeCompare(b.observedAt) || a.id.localeCompare(b.id))
+        .map((o) => ({
+          id: o.id,
+          observedAt: o.observedAt,
+          status: o.status,
+          densityPerMm: o.densityPerMm,
+        })),
     };
   },
   async createObservation(args) {

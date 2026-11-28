@@ -7,3 +7,10 @@ import { capillaryClinicalFlagKeys } from "./data/capillary-patterns";
 
 /** 臨床フラグ4項目のキー（capillaryClinicalFlagKeys と対応）。 */
 export type ClinicalFlagKey = (typeof capillaryClinicalFlagKeys)[number];
+
+import { capillaryPatterns as allPatterns } from "./data/capillary-patterns";
+
+/** パターンの番号（定義順の 1〜28）。「No.」表示に使う。 */
+export const patternNumberByCode: Record<string, number> = Object.fromEntries(
+  allPatterns.map((p, i) => [p.code, i + 1]),
+);

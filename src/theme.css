@@ -133,9 +133,16 @@
 .r-num { font-size: 20px; font-weight: 700; color: var(--heading); line-height: 1.6; }
 .r-src { font-size: 13px; color: var(--dim); line-height: 1.6; }
 
-/* ===== 印刷：レポートだけをA4 1枚に収める ===== */
+/* 計測値の枠と、大きな数字。 */
+.r-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--paper); padding: 12px 16px; }
+.r-big { font-size: 44px; font-weight: 700; color: var(--heading); line-height: 1.2; }
+
+/* ===== 印刷：レポートだけをA4で出す =====
+   文字は大きめにする（受け取る方が読みやすい大きさ。本文 19.5pt・行間 1.9、
+   小さめの要素も 18pt）。1枚に収めることより読みやすさを優先し、複数ページになる。
+   見出しだけがページの最後に残らないように、また枠・図がページをまたがないようにする。 */
 @media print {
-  @page { size: A4; margin: 11mm; }
+  @page { size: A4; margin: 10mm; }
   body { background: #ffffff !important; }
   body * { visibility: hidden; }
   #report-print, #report-print * { visibility: visible; }
@@ -145,18 +152,61 @@
     left: 0;
     width: 100%;
     background: #ffffff !important;
-    color: #1c2b33 !important;
+    color: #1b2733 !important;
     padding: 0 !important;
     box-shadow: none !important;
   }
-  #report-print .r-title { font-size: 21pt; color: #0d3b4c !important; }
-  #report-print .r-meta { font-size: 10.5pt; color: #5b7183 !important; }
-  #report-print .r-sec { font-size: 13pt; margin-top: 12pt; margin-bottom: 4pt; color: #0d3b4c !important; border-bottom: 1.5pt solid #12808a !important; }
-  #report-print .r-body { font-size: 11pt; line-height: 1.6; color: #1c2b33 !important; }
-  #report-print .r-small { font-size: 10pt; line-height: 1.55; color: #1c2b33 !important; }
-  #report-print .r-why { font-size: 10pt; line-height: 1.55; color: #12808a !important; }
-  #report-print .r-num { font-size: 12pt; color: #0d3b4c !important; }
-  #report-print .r-src { font-size: 8.5pt; color: #8ca2ae !important; }
+  #report-print .r-title { font-size: 26pt; color: #0b2545 !important; }
+  #report-print .r-meta { font-size: 18pt; line-height: 1.6; color: #44546a !important; }
+  #report-print .r-sec { font-size: 22pt; margin-top: 12pt; margin-bottom: 5pt; color: #0b2545 !important; border-bottom: 2pt solid #1d5fa8 !important; break-after: avoid; }
+  #report-print .r-body { font-size: 19.5pt; line-height: 1.9; color: #1b2733 !important; }
+  #report-print .r-small { font-size: 18pt; line-height: 1.65; color: #1b2733 !important; }
+  #report-print .r-why { font-size: 18pt; line-height: 1.65; color: #1d5fa8 !important; }
+  #report-print .r-num { font-size: 22pt; color: #0b2545 !important; }
+  #report-print .r-big { font-size: 44pt; color: #0b2545 !important; }
+  #report-print .r-pattern { font-size: 20pt; }
+  /* 形の説明は、模式図を左上に小さく置き、文章を回り込ませる（余白を減らす）。 */
+  #report-print .r-pattern-body { display: block; }
+  #report-print .r-pattern-fig { float: left; width: 52mm; height: 30mm; margin: 2mm 5mm 1mm 0; }
+  #report-print .r-pattern-text { display: block; }
+  #report-print .r-pattern-body::after { content: ""; display: block; clear: both; }
+  /* 見出しの帯：題名を折り返さないよう、発行元は題名の下に回す。 */
+  #report-print .r-head { flex-wrap: wrap; }
+  #report-print .r-issuer { flex-basis: 100%; text-align: right; padding-top: 0; }
+  #report-print .r-src { font-size: 14pt; line-height: 1.6; color: #5b6b7d !important; break-before: avoid; margin-top: 10pt !important; }
+  #report-print .r-card { background: #eaeff5 !important; border: 1pt solid #c5cfdb !important; }
+  /* 大きな文字では、長いかたまり（形の説明など）はページをまたいでよい。
+     またがせないのは、図・画像・数値の枠・1行ずつの項目だけ（大きな空白ができないように）。 */
+  #report-print figure, #report-print .r-card, #report-print .r-chart, #report-print dl > div { break-inside: avoid; }
+  #report-print p { orphans: 2; widows: 2; }
+  #report-print h3 { break-after: avoid; }
+  #report-print dl { display: block; }
+  #report-print dl > div { flex-wrap: wrap; }
   #report-print img { max-height: 62mm; object-fit: cover; }
+  /* 数えた位置を重ねる画像は、切り抜かずに全体を出す（点の位置がずれないように）。 */
+  #report-print .r-figure { max-width: calc(72mm * var(--fig-ratio, 1.6)); }
+  #report-print .r-compare-img { max-height: 50mm; }
+  #report-print .r-figure img { max-height: none; object-fit: fill; }
   .no-print { display: none !important; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  /* ----- 枚数を少なくする印刷（控え用）。html の data-print="compact" のとき。 ----- */
+  html[data-print="compact"] #report-print .r-title { font-size: 20pt; }
+  html[data-print="compact"] #report-print .r-meta { font-size: 11pt; }
+  html[data-print="compact"] #report-print .r-sec { font-size: 13.5pt; margin-top: 8pt; margin-bottom: 3pt; border-bottom-width: 1.5pt !important; }
+  html[data-print="compact"] #report-print .r-body { font-size: 11.5pt; line-height: 1.65; }
+  html[data-print="compact"] #report-print .r-small,
+  html[data-print="compact"] #report-print .r-why { font-size: 10.5pt; line-height: 1.6; }
+  html[data-print="compact"] #report-print .r-num { font-size: 13pt; }
+  html[data-print="compact"] #report-print .r-big { font-size: 26pt; }
+  html[data-print="compact"] #report-print .r-pattern { font-size: 12pt; }
+  html[data-print="compact"] #report-print .r-src { font-size: 8.5pt; }
+  html[data-print="compact"] #report-print dl { display: grid; }
+  html[data-print="compact"] #report-print .r-keep, html[data-print="compact"] #report-print article { break-inside: avoid; }
+  html[data-print="compact"] #report-print .r-figure { max-width: calc(50mm * var(--fig-ratio, 1.6)); }
+  html[data-print="compact"] #report-print .r-chart { max-width: 90mm; }
+  html[data-print="compact"] #report-print .r-card { padding: 6pt 10pt; }
+  html[data-print="compact"] #report-print .r-compare-img { max-height: 32mm; }
+  html[data-print="compact"] #report-print .r-pattern-fig { width: 40mm; height: 23mm; }
+  html[data-print="compact"] #report-print .r-issuer { flex-basis: auto; }
 }
