@@ -1,4 +1,4 @@
-// 試験モード：試験データ画面。試験名で絞り込んだ観察を一覧し、
+// 研究用モード：試験データ画面。試験名で絞り込んだ観察を一覧し、
 // 数値データと実施内容を CSV で書き出す（解析・症例集積用）。
 // CSV は画面表示と同じ値から組み立て、値は事実の記録のまま出す。
 
@@ -130,7 +130,7 @@ export function TrialDataScreen({ onBack }: { onBack: () => void }) {
       {names.data && trialNames.length === 0 && (
         <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-6 text-center">
           <p className="text-lg text-[var(--text)]">
-            試験名が記録された観察はまだありません。試験モードをONにして観察を記録すると、ここに試験名が出ます。
+            試験名が記録された観察はまだありません。研究用モードで観察を記録すると、ここに試験名が出ます。
           </p>
         </div>
       )}

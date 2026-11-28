@@ -78,7 +78,7 @@ export interface FlowVelocity {
   note?: string;
 }
 
-/** 試験モード: 実施内容の種別。 */
+/** 研究用（試験記録）: 実施内容の種別。 */
 export type InterventionType =
   | "gas_inhalation" // ガス吸入
   | "supplement_food" // サプリ・食品
@@ -86,10 +86,10 @@ export type InterventionType =
   | "thermal" // 温熱
   | "other";
 
-/** 試験モード: ガス吸入のガス種。 */
+/** 研究用（試験記録）: ガス吸入のガス種。 */
 export type GasType = "radon" | "hydrogen" | "hydrogen_oxygen";
 
-/** 試験モード: 実施のタイミング（この観察との関係）。 */
+/** 研究用（試験記録）: 実施のタイミング（この観察との関係）。 */
 export type InterventionTiming = "before" | "after" | "during_period";
 
 export interface Intervention {
@@ -101,7 +101,7 @@ export interface Intervention {
   timing: InterventionTiming;
 }
 
-/** 試験モードの記録。通常の観察では null。 */
+/** 研究用（試験記録）の記録。通常の観察では null。 */
 export interface StudyInfo {
   /** 試験名（プロトコル名）。 */
   studyName: string;
@@ -144,7 +144,7 @@ export interface Observation {
   videos: MediaRef[];
   /** 血流速度の参考値。未計測は null。 */
   flowVelocity: FlowVelocity | null;
-  /** 試験モードの情報。通常観察は null。 */
+  /** 研究用（試験記録）の情報。通常観察は null。 */
   study: StudyInfo | null;
   status: ObservationStatus;
   createdBy: string; // staff uid

@@ -95,7 +95,7 @@ export function ReportBody({
   /** 同じ対象者の直前の観察（ビフォアアフター比較欄用）。なければ欄ごと出さない。 */
   prev?: Observation | null;
   qrDataUrl?: string | null;
-  /** 試験モードONのときだけ、試験名・群・実施内容を表示する。 */
+  /** 研究用モードのときだけ、試験名・群・実施内容を表示する。 */
   trialMode?: boolean;
 }) {
   const flags = activeFlags(obs);

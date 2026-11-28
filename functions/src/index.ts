@@ -367,7 +367,9 @@ export const analyzeImagePatterns = onCall<
         },
         body: JSON.stringify({
           model,
-          temperature: 0.2,
+          // 再現性のため 0 に固定する（同じ画像には同じ応答が返りやすくし、
+          // 誰が検査しても同じ回答に近づける）。
+          temperature: 0,
           response_format: { type: "json_object" },
           messages: [
             {

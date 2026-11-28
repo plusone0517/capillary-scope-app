@@ -19,6 +19,7 @@ import {
 } from "./CapturePanel";
 import { CompareScreen } from "./CompareView";
 import { FlowMeasure } from "./FlowMeasure";
+import { SimpleNewScreen } from "./SimpleExam";
 import { TrialDataScreen } from "./TrialData";
 import { FindingsForm, emptyFindings, type FindingsState } from "./FindingsForm";
 import {
@@ -56,58 +57,71 @@ type View =
   | { kind: "trialData" }
   | { kind: "compare"; beforeId: string; afterId: string };
 
-const TRIAL_MODE_KEY = "capillary-app:trial-mode";
+/**
+ * アプリ全体のモード。
+ * - simple（一般検査）：入力は名前だけ。撮影 → AI解析 → 28種の結果 →
+ *   レポートを最小の操作で進める。
+ * - research（研究用）：室温・安静時間などの撮影条件、所見の詳細入力、
+ *   試験データ・CSV など、従来の詳細な機能をすべて使う。
+ * 旧「試験モード」はこの2モード制に置き換えた（ONだった端末は研究用へ移行）。
+ */
+export type AppMode = "simple" | "research";
 
-function loadTrialMode(): boolean {
+const MODE_KEY = "capillary-app:mode";
+/** 旧・試験モードの設定キー（移行の読み取り専用）。 */
+const LEGACY_TRIAL_MODE_KEY = "capillary-app:trial-mode";
+
+function loadMode(): AppMode {
   try {
-    return window.localStorage.getItem(TRIAL_MODE_KEY) === "on";
+    const saved = window.localStorage.getItem(MODE_KEY);
+    if (saved === "simple" || saved === "research") return saved;
+    // 移行：旧・試験モードが ON だった端末は研究用モードにする。
+    if (window.localStorage.getItem(LEGACY_TRIAL_MODE_KEY) === "on") {
+      return "research";
+    }
   } catch {
-    return false;
+    // 読めない場合は既定の一般検査にする。
   }
+  return "simple";
 }
 
-/** 試験モードの ON/OFF 切り替え。ON のときだけ試験用の入力・表示が出る。 */
-function TrialModeToggle({
-  trialMode,
+/** 一般検査／研究用の切り替え。ナビに置く。 */
+function ModeToggle({
+  mode,
   onChange,
-  compact = false,
 }: {
-  trialMode: boolean;
-  onChange: (next: boolean) => void;
-  /** ヘッダーのナビに収める小さい表示にする。 */
-  compact?: boolean;
+  mode: AppMode;
+  onChange: (next: AppMode) => void;
 }) {
+  const options: { value: AppMode; label: string }[] = [
+    { value: "simple", label: "一般検査" },
+    { value: "research", label: "研究用" },
+  ];
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={trialMode}
-      aria-label="試験モード"
-      onClick={() => onChange(!trialMode)}
-      className={`flex items-center rounded-full border-2 font-bold ${
-        compact
-          ? "min-h-11 gap-2 whitespace-nowrap px-2.5 text-sm sm:gap-3 sm:px-3 sm:text-base"
-          : "min-h-14 gap-3 px-4 text-lg"
-      } ${
-        trialMode
-          ? "border-[var(--accent)] bg-[var(--accent)] text-white"
-          : "border-[var(--border)] bg-[var(--surface)] text-[var(--text)]"
-      }`}
+    <div
+      role="group"
+      aria-label="モード切替"
+      className="flex shrink-0 items-center rounded-full border-2 border-[var(--border)] bg-[var(--surface)] p-0.5"
     >
-      <span
-        aria-hidden="true"
-        className={`relative shrink-0 rounded-full ${
-          compact ? "h-6 w-10" : "h-7 w-12"
-        } ${trialMode ? "bg-white/30" : "bg-[var(--paper)]"}`}
-      >
-        <span
-          className={`absolute top-0.5 rounded-full bg-white shadow ${
-            compact ? "h-5 w-5" : "h-6 w-6"
-          } ${trialMode ? "right-0.5" : "left-0.5"}`}
-        />
-      </span>
-      試験モード：{trialMode ? "ON" : "OFF"}
-    </button>
+      {options.map((opt) => {
+        const active = mode === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(opt.value)}
+            className={`min-h-11 whitespace-nowrap rounded-full px-3 text-sm font-bold sm:px-4 sm:text-base ${
+              active
+                ? "bg-[var(--accent)] text-white"
+                : "text-[var(--dim)] hover:bg-[var(--paper)]"
+            }`}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -115,19 +129,19 @@ function TrialModeToggle({
 
 /**
  * 全画面共通のナビ（画面上部に追随）。主要メニューと現在地、
- * 試験モードの切り替えをここに集約する。
+ * モード（一般検査／研究用）の切り替えをここに集約する。
  */
 function AppNav({
   view,
   go,
-  trialMode,
-  onTrialModeChange,
+  mode,
+  onModeChange,
   wide,
 }: {
   view: View;
   go: (v: View) => void;
-  trialMode: boolean;
-  onTrialModeChange: (next: boolean) => void;
+  mode: AppMode;
+  onModeChange: (next: AppMode) => void;
   wide: boolean;
 }) {
   const itemClass = (active: boolean) =>
@@ -162,11 +176,7 @@ function AppNav({
           </button>
         </nav>
         <div className="ml-auto shrink-0">
-          <TrialModeToggle
-            trialMode={trialMode}
-            onChange={onTrialModeChange}
-            compact
-          />
+          <ModeToggle mode={mode} onChange={onModeChange} />
         </div>
       </div>
     </div>
@@ -390,11 +400,13 @@ function patternSummary(codes: string[]): string | null {
 
 function ListScreen({
   go,
-  trialMode,
+  mode,
 }: {
   go: (v: View) => void;
-  trialMode: boolean;
+  mode: AppMode;
 }) {
+  // 試験データ・CSVなどの研究寄りの導線は、研究用モードでのみ出す。
+  const research = mode === "research";
   const [search, setSearch] = useState("");
   const [submittedSearch, setSubmittedSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -447,10 +459,10 @@ function ListScreen({
         </button>
       </div>
 
-      {trialMode && (
+      {research && (
         <div className="flex flex-col gap-2 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-card)] sm:flex-row sm:items-center sm:justify-between">
           <p className="text-base leading-relaxed text-[var(--text)]">
-            試験モードがONです。観察の入力・編集で試験名・群・実施内容を記録でき、ビフォアアフターでは「この間に実施したこと」が表示されます。
+            研究用モードです。観察の入力・編集で試験名・群・実施内容を記録でき、ビフォアアフターでは「この間に実施したこと」が表示されます。
           </p>
           <button
             type="button"
@@ -631,7 +643,7 @@ function ListScreen({
                         動画あり
                       </span>
                     )}
-                    {trialMode && obs.trialName && (
+                    {research && obs.trialName && (
                       <span className="rounded-full bg-[var(--paper)] px-3 py-0.5 text-sm font-bold text-[var(--text)]">
                         試験：{obs.trialName}
                       </span>
@@ -671,7 +683,8 @@ function ListScreen({
 
 /* ================= 新しい観察 ================= */
 
-function NewScreen({ go, trialMode }: { go: (v: View) => void; trialMode: boolean }) {
+/** 研究用モードの「新しい観察」。従来の詳細フォームをそのまま使う。 */
+function NewScreen({ go }: { go: (v: View) => void }) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<FindingsState>(() => emptyFindings(nowLocalInput()));
   const [images, setImages] = useState<CapturedImage[]>([]);
@@ -799,7 +812,7 @@ function NewScreen({ go, trialMode }: { go: (v: View) => void; trialMode: boolea
               value={form}
               onChange={setForm}
               autoSummary={buildAutoSummary(form)}
-              trialMode={trialMode}
+              trialMode={true}
               measureImageUrl={
                 (images[primaryIndex] ?? images[0])?.previewUrl ?? null
               }
@@ -849,11 +862,11 @@ function NewScreen({ go, trialMode }: { go: (v: View) => void; trialMode: boolea
 function ReportScreen({
   id,
   go,
-  trialMode,
+  mode,
 }: {
   id: string;
   go: (v: View) => void;
-  trialMode: boolean;
+  mode: AppMode;
 }) {
   const queryClient = useQueryClient();
   const authState = useAuth();
@@ -1036,7 +1049,7 @@ function ReportScreen({
           obs={obs}
           prev={prevObs}
           qrDataUrl={obs.status === "finalized" ? qrDataUrl : null}
-          trialMode={trialMode}
+          trialMode={mode === "research"}
         />
       </div>
 
@@ -1087,11 +1100,11 @@ function ReportScreen({
 function EditScreen({
   id,
   go,
-  trialMode,
+  mode,
 }: {
   id: string;
   go: (v: View) => void;
-  trialMode: boolean;
+  mode: AppMode;
 }) {
   const queryClient = useQueryClient();
   const detail = useQuery({
@@ -1364,7 +1377,7 @@ function EditScreen({
               value={form}
               onChange={setForm}
               autoSummary={buildAutoSummary(form)}
-              trialMode={trialMode}
+              trialMode={mode === "research"}
               measureImageUrl={
                 (obs.images.find((img) => img.isPrimary) ?? obs.images[0])
                   ?.url ?? null
@@ -1544,44 +1557,51 @@ function MeasureScreen({ id, go }: { id: string; go: (v: View) => void }) {
 
 export function CapillaryApp() {
   const [view, setView] = useState<View>({ kind: "list" });
-  const [trialMode, setTrialMode] = useState<boolean>(() => loadTrialMode());
+  const [mode, setMode] = useState<AppMode>(() => loadMode());
   const go = (v: View) => {
     setView(v);
     window.scrollTo({ top: 0 });
   };
-  const changeTrialMode = (next: boolean) => {
-    setTrialMode(next);
+  const changeMode = (next: AppMode) => {
+    setMode(next);
     try {
-      window.localStorage.setItem(TRIAL_MODE_KEY, next ? "on" : "off");
+      window.localStorage.setItem(MODE_KEY, next);
     } catch {
       // 保存できなくても、この画面を開いている間は切り替えが効く。
     }
   };
 
   // 観察の入力・編集画面は分割レイアウトで画像を大きく見せるため幅を広げる。
-  // それ以外の画面の幅は従来どおり。
-  const wideView = view.kind === "new" || view.kind === "edit";
+  // それ以外の画面の幅は従来どおり。一般検査の新しい観察は1カラムの
+  // 簡易画面なので広げない。
+  const wideView =
+    view.kind === "edit" || (view.kind === "new" && mode === "research");
 
   return (
     <div className="min-h-screen bg-[var(--bg)]">
       <AppNav
         view={view}
         go={go}
-        trialMode={trialMode}
-        onTrialModeChange={changeTrialMode}
+        mode={mode}
+        onModeChange={changeMode}
         wide={wideView}
       />
       <main
         className={`mx-auto w-full px-4 pb-10 pt-4 sm:px-6 ${wideView ? "max-w-[1680px]" : "max-w-6xl"}`}
       >
-        {view.kind === "list" && (
-          <ListScreen go={go} trialMode={trialMode} />
-        )}
-        {view.kind === "new" && <NewScreen go={go} trialMode={trialMode} />}
+        {view.kind === "list" && <ListScreen go={go} mode={mode} />}
+        {view.kind === "new" &&
+          (mode === "simple" ? (
+            <SimpleNewScreen go={go} />
+          ) : (
+            <NewScreen go={go} />
+          ))}
         {view.kind === "report" && (
-          <ReportScreen id={view.id} go={go} trialMode={trialMode} />
+          <ReportScreen id={view.id} go={go} mode={mode} />
         )}
-        {view.kind === "edit" && <EditScreen id={view.id} go={go} trialMode={trialMode} />}
+        {view.kind === "edit" && (
+          <EditScreen id={view.id} go={go} mode={mode} />
+        )}
         {view.kind === "measure" && <MeasureScreen id={view.id} go={go} />}
         {view.kind === "trialData" && (
           <TrialDataScreen onBack={() => go({ kind: "list" })} />
@@ -1592,7 +1612,7 @@ export function CapillaryApp() {
             afterId={view.afterId}
             onBackToList={() => go({ kind: "list" })}
             onOpenReport={(rid) => go({ kind: "report", id: rid })}
-            trialMode={trialMode}
+            trialMode={mode === "research"}
           />
         )}
       </main>

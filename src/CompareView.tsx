@@ -131,7 +131,7 @@ export function CompareScreen({
   afterId: string;
   onBackToList: () => void;
   onOpenReport: (id: string) => void;
-  /** 試験モードONのときだけ「この間に実施したこと」を表示する。 */
+  /** 研究用モードのときだけ「この間に実施したこと」を表示する。 */
   trialMode?: boolean;
 }) {
   const qBefore = useQuery({

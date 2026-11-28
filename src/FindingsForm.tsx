@@ -56,7 +56,7 @@ export type FindingsState = {
   adviceMemo: string;
   nextNote: string;
   referralGiven: boolean;
-  // 試験モード用（試験モードONのときだけ入力欄が出る）
+  // 研究用（試験）情報用（研究用モードのときだけ入力欄が出る）
   trialName: string;
   trialGroup: string;
   interventions: InterventionDraft[];
@@ -176,7 +176,7 @@ export function FindingsForm({
   value: FindingsState;
   onChange: (next: FindingsState) => void;
   autoSummary: string;
-  /** 試験モードONのときだけ、試験情報（試験名・群・実施内容）の入力欄を出す。 */
+  /** 研究用モードのときだけ、試験情報（試験名・群・実施内容）の入力欄を出す。 */
   trialMode?: boolean;
   /**
    * AI候補提示（試作）の対象画像（この観察の主たる静止画1枚）があるか。
@@ -834,7 +834,7 @@ export function FindingsForm({
       {trialMode && (
         <section aria-label="試験情報" className="flex flex-col gap-4">
           <h2 className="text-xl font-bold text-[var(--text)]">
-            6. 試験情報（試験モード）
+            6. 試験情報（研究用）
           </h2>
           <p className="text-base text-[var(--dim)]">
             試験として記録する観察では、試験名と群、この観察の前後・期間中に実施したことを記録します。実施内容は事実の記録です。

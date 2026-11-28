@@ -281,6 +281,83 @@ export async function captureFrameFromVideoUrl(
   }
 }
 
+/** video のシークが終わるまで待つ（終わらない環境向けにタイムアウト付き）。 */
+function seekVideoTo(video: HTMLVideoElement, target: number): Promise<void> {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      video.removeEventListener("seeked", finish);
+      resolve();
+    };
+    video.addEventListener("seeked", finish);
+    video.currentTime = target;
+    window.setTimeout(finish, 2000);
+  });
+}
+
+/** 動画のフレームが描画可能になる（readyState >= 2）まで待つ。 */
+function waitVideoReady(video: HTMLVideoElement): Promise<void> {
+  return new Promise((resolve) => {
+    if (video.readyState >= 2) {
+      resolve();
+      return;
+    }
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      video.removeEventListener("loadeddata", finish);
+      resolve();
+    };
+    video.addEventListener("loadeddata", finish);
+    window.setTimeout(finish, 2000);
+  });
+}
+
+/**
+ * 動画（Blob URL など）から、等間隔に最大 count 枚の静止画を切り出す。
+ * 一般検査モードの AI解析で使う（動画の複数フレームを解析して集約し、
+ * 1フレームだけの偶然やスタッフの主観に寄らない結果にするため）。
+ * 切り出し位置は (i + 0.5) / count の地点。長さが取れない形式では
+ * 先頭フレーム1枚だけを返す。対象は同一オリジンで読める URL に限る。
+ */
+export async function captureFramesFromVideoUrl(
+  src: string,
+  count: number,
+): Promise<CapturedImage[]> {
+  const video = document.createElement("video");
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = "auto";
+  video.src = src;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      video.onloadedmetadata = () => resolve();
+      video.onerror = () => reject(new Error("動画を読み込めませんでした"));
+    });
+    await waitVideoReady(video);
+    const duration = video.duration;
+    if (!Number.isFinite(duration) || duration <= 0) {
+      return [await captureFromVideo(video)];
+    }
+    const frames: CapturedImage[] = [];
+    for (let i = 0; i < count; i++) {
+      const target = Math.min(
+        ((i + 0.5) / count) * duration,
+        Math.max(0, duration - 0.05),
+      );
+      if (target > 0) await seekVideoTo(video, target);
+      frames.push(await captureFromVideo(video));
+    }
+    return frames;
+  } finally {
+    video.removeAttribute("src");
+    video.load();
+  }
+}
+
 export type CameraSupport =
   | { kind: "ok" }
   | { kind: "iphone" }
