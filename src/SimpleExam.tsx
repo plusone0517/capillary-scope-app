@@ -13,6 +13,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ConsentFields } from "./ConsentFields";
 import { DensityCountField } from "./DensityCountField";
+import { useVideoStill, VideoStillNote } from "./VideoStill";
 import type { DensityMeasurement } from "./densityCount";
 import { CustomerPicker, usePreselectedCustomer } from "./CustomerPicker";
 import type { CustomerRecord } from "./customer";
@@ -28,8 +29,8 @@ import {
 import { AnnotatedImage, type AnnotationItem } from "./AnnotatedImage";
 import { PatternDiagram } from "./PatternDiagram";
 import {
-  captureFrameFromVideoUrl,
   captureFramesFromVideoUrl,
+  captureSharpestFramesFromVideoUrl,
   type CapturedImage,
   type CapturedVideo,
 } from "./camera";
@@ -108,33 +109,14 @@ export function SimpleNewScreen({
     onVideoChange: setVideo,
   });
 
-  // 動画だけが添付されていて静止画が無いときは、動画から静止画を1枚
-  // 切り出して代表画像にする（研究用モードの新しい観察と同じ扱い）。
-  const frameDerivedFor = useRef<string | null>(null);
-  const [frameNote, setFrameNote] = useState<string | null>(null);
-  useEffect(() => {
-    if (!video || images.length > 0) return;
-    if (frameDerivedFor.current === video.previewUrl) return;
-    frameDerivedFor.current = video.previewUrl;
-    let cancelled = false;
-    void captureFrameFromVideoUrl(video.previewUrl)
-      .then((frame) => {
-        if (cancelled) return;
-        setImages((current) => (current.length > 0 ? current : [frame]));
-        setPrimaryIndex(0);
-        setFrameNote("動画から静止画を切り出して代表画像にしました。");
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setFrameNote(
-            "動画からの静止画の切り出しができませんでした。静止画も撮影すると、レポートに画像が残ります。",
-          );
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [video, images.length]);
+  // 動画から、いちばん鮮明な場面を切り出して代表画像にする（VideoStill.tsx）。
+  const still = useVideoStill({
+    video,
+    images,
+    setImages,
+    setPrimaryIndex,
+    failureHint: "静止画も撮影すると、レポートに画像が残ります。",
+  });
 
   /* ================= AI解析 ================= */
 
@@ -167,10 +149,13 @@ export function SimpleNewScreen({
     const targets: AnalyzedImageInput[] = [];
     if (video) {
       try {
-        const frames = await captureFramesFromVideoUrl(
+        // 動画の中で鮮明な場面を選んで解析する（選べないときは等間隔に切り出す）。
+        const frames = await captureSharpestFramesFromVideoUrl(
           video.previewUrl,
           MAX_VIDEO_FRAMES,
-        );
+        )
+          .then((r) => r.frames.map((f) => f.image))
+          .catch(() => captureFramesFromVideoUrl(video.previewUrl, MAX_VIDEO_FRAMES));
         targets.push(...frames);
       } catch {
         // フレーム切り出しに失敗したら、静止画だけで続ける。
@@ -382,11 +367,6 @@ export function SimpleNewScreen({
           </section>
           <CaptureIntro support={cap.support} className="order-2" />
           <CaptureControls cap={cap} className="order-4" />
-          {frameNote && (
-            <p className="order-4 rounded-[var(--radius)] bg-[var(--paper)] p-3 text-base leading-relaxed text-[var(--text)]">
-              {frameNote}
-            </p>
-          )}
           <section aria-label="AI解析" className="order-5 flex flex-col gap-4">
             <h2 className="text-xl font-bold text-[var(--text)]">2. AI解析</h2>
             <p className="text-base leading-relaxed text-[var(--dim)]">
@@ -610,7 +590,11 @@ export function SimpleNewScreen({
           </div>
         </div>
         <div className="contents lg:order-2 lg:block lg:min-h-0">
-          <CaptureMediaDisplay cap={cap} className="order-3 lg:h-full" />
+          <CaptureMediaDisplay
+            cap={cap}
+            className="order-3 lg:h-full"
+            afterImages={<VideoStillNote still={still} className="lg:shrink-0" />}
+          />
         </div>
       </div>
     </div>

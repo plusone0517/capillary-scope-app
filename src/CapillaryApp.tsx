@@ -23,6 +23,7 @@ import { CompareScreen } from "./CompareView";
 import { FlowMeasure } from "./FlowMeasure";
 import { SimpleNewScreen } from "./SimpleExam";
 import { TrialDataScreen } from "./TrialData";
+import { useVideoStill, VideoStillNote } from "./VideoStill";
 import { FindingsForm, emptyFindings, type FindingsState } from "./FindingsForm";
 import {
 ReceiveQr,
@@ -32,7 +33,7 @@ isDummySubject,
 useQrDataUrl,
 } from "./ReportView";
 import {
-captureFrameFromVideoUrl,
+captureSharpestFramesFromVideoUrl,
 fileToCaptured,
 fileToCapturedVideo,
 type CapturedImage,
@@ -739,37 +740,14 @@ function NewScreen({
     onVideoChange: setVideo,
   });
 
-  // 動画だけが添付されていて静止画が無いときは、動画から静止画を1枚
-  // 切り出して代表画像にする（AI候補・自動計測は静止画が対象のため）。
-  // 切り出しは動画ごとに1回だけ。切り出した静止画を削除しても、
-  // 同じ動画から自動で作り直すことはしない。
-  const frameDerivedFor = useRef<string | null>(null);
-  const [frameNote, setFrameNote] = useState<string | null>(null);
-  useEffect(() => {
-    if (!video || images.length > 0) return;
-    if (frameDerivedFor.current === video.previewUrl) return;
-    frameDerivedFor.current = video.previewUrl;
-    let cancelled = false;
-    void captureFrameFromVideoUrl(video.previewUrl)
-      .then((frame) => {
-        if (cancelled) return;
-        setImages((current) => (current.length > 0 ? current : [frame]));
-        setPrimaryIndex(0);
-        setFrameNote(
-          "動画から静止画を切り出して代表画像にしました。AI候補と自動計測は、この静止画を対象に使えます。",
-        );
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setFrameNote(
-            "動画からの静止画の切り出しができませんでした。AI候補・自動計測を使う場合は、静止画も撮影してください。",
-          );
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [video, images.length]);
+  // 動画から、いちばん鮮明な場面を切り出して代表画像にする（VideoStill.tsx）。
+  const still = useVideoStill({
+    video,
+    images,
+    setImages,
+    setPrimaryIndex,
+    failureHint: "AI候補・自動計測を使う場合は、静止画も撮影してください。",
+  });
 
   const create = useMutation({
     mutationFn: async () => {
@@ -838,11 +816,6 @@ function NewScreen({
             className="order-1 scroll-mt-32 lg:scroll-mt-4"
           />
           <CaptureControls cap={cap} className="order-3" />
-          {frameNote && (
-            <p className="order-3 rounded-[var(--radius)] bg-[var(--paper)] p-3 text-base leading-relaxed text-[var(--text)]">
-              {frameNote}
-            </p>
-          )}
           <div id="obs-step-findings" className="order-4 scroll-mt-32 lg:scroll-mt-4">
             <FindingsForm
               value={form}
@@ -886,7 +859,11 @@ function NewScreen({
           </div>
         </div>
         <div className="contents lg:order-2 lg:block lg:min-h-0">
-          <CaptureMediaDisplay cap={cap} className="order-2 lg:h-full" />
+          <CaptureMediaDisplay
+            cap={cap}
+            className="order-2 lg:h-full"
+            afterImages={<VideoStillNote still={still} className="lg:shrink-0" />}
+          />
         </div>
       </div>
     </div>
@@ -1279,7 +1256,8 @@ function EditScreen({
       const blob = await api.fetchStoredBlob(current.video.storagePath);
       const url = URL.createObjectURL(blob);
       try {
-        const frame = await captureFrameFromVideoUrl(url);
+        // 保存済みの動画でも、いちばん鮮明な場面を選んで切り出す。
+        const frame = (await captureSharpestFramesFromVideoUrl(url, 1)).frames[0].image;
         try {
           return await api.addImage({
             observationId: id,

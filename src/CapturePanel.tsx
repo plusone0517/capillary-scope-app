@@ -19,6 +19,7 @@ import {
   useState,
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
 import {
 blobToCapturedVideo,
@@ -40,7 +41,7 @@ type SharpnessMeter,
 } from "./camera";
 import { ImageQualityHint } from "./ImageQualityHint";
 
-const MAX_IMAGES = 5;
+export const MAX_IMAGES = 5;
 const MAX_RECORD_SEC = 20;
 
 /** 手動で選んだカメラを次回も使うため、deviceId を保存するキー。 */
@@ -868,9 +869,12 @@ export function CaptureIntro({
 export function CaptureMediaDisplay({
   cap,
   className = "",
+  afterImages,
 }: {
   cap: CapturePanelApi;
   className?: string;
+  /** 撮った画像の一覧のすぐ下に出すもの（動画からの切り出しの案内など）。 */
+  afterImages?: ReactNode;
 }) {
   const {
     images,
@@ -1265,6 +1269,7 @@ export function CaptureMediaDisplay({
           />
         </div>
       )}
+      {afterImages}
       {video && (
         <div className="hidden flex-col gap-2 lg:flex lg:shrink-0">
           <p className="text-lg font-medium text-[var(--text)]">

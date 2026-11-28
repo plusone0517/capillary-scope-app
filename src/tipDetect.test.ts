@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { detectLoopTips } from "./tipDetect";
-import { assessImageQuality, issuesOf } from "./imageQuality";
+import { assessImageQuality, frameScore, issuesOf, pickBestIndexes } from "./imageQuality";
 import { boxSum, percentile, toWorkImage } from "./vesselSignal";
 import type { RgbaImage } from "./scaleDetect";
 
@@ -214,5 +214,33 @@ describe("下ごしらえ", () => {
     expect(percentile(v, 50)).toBe(50);
     expect(percentile(v, 99)).toBe(99);
     expect(percentile(new Float32Array(0), 50)).toBe(0);
+  });
+});
+
+describe("動画の場面を比べる", () => {
+  const q = { sharpness: 10, vesselContrast: 12, brightness: 130, glarePct: 0.5, issues: [] };
+
+  it("鮮明な場面ほど点数が高い", () => {
+    expect(frameScore(q)).toBeGreaterThan(frameScore({ ...q, sharpness: 6 }));
+    expect(frameScore(null)).toBe(0);
+  });
+
+  it("血管がほとんど写っていない場面・反射の多い場面・暗すぎる場面は点数を下げる", () => {
+    expect(frameScore({ ...q, vesselContrast: 3 })).toBeLessThan(frameScore(q) * 0.5);
+    expect(frameScore({ ...q, glarePct: 10 })).toBeLessThan(frameScore(q) * 0.7);
+    expect(frameScore({ ...q, brightness: 40 })).toBeLessThan(frameScore(q));
+  });
+
+  it("点数の高い場面を、時間の順に返す", () => {
+    expect(pickBestIndexes([1, 5, 2, 9, 3], 1)).toEqual([3]);
+    expect(pickBestIndexes([1, 5, 2, 9, 3, 0, 8], 3)).toEqual([1, 3, 6]);
+  });
+
+  it("となり合う場面は避けて選び、足りなければとなりも使う", () => {
+    // 9 と 8 はとなり合うので、3枚目までは間をあける。
+    expect(pickBestIndexes([1, 9, 8, 2, 7, 1], 2)).toEqual([1, 4]);
+    expect(pickBestIndexes([9, 8, 7], 3)).toEqual([0, 1, 2]);
+    expect(pickBestIndexes([4, 4, 4, 4], 2)).toEqual([0, 2]);
+    expect(pickBestIndexes([], 2)).toEqual([]);
   });
 });

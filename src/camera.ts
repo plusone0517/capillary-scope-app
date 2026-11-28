@@ -3,6 +3,13 @@
 // 撮影は video要素 + canvas のキャプチャのみを使う（Safariでも動く方式）。
 // ImageCapture など Chrome専用APIには依存しない。
 
+import {
+  assessImageQuality,
+  frameScore,
+  pickBestIndexes,
+  type ImageQuality,
+} from "./imageQuality";
+
 export type CapturedImage = {
   dataBase64: string;
   mimeType: "image/jpeg" | "image/png";
@@ -317,9 +324,45 @@ function waitVideoReady(video: HTMLVideoElement): Promise<void> {
 }
 
 /**
+ * 長さが分からない動画の長さを確かめる。
+ * ブラウザで録画した WebM は、長さの情報を持たないことがある（duration が Infinity）。
+ * いったん末尾まで移動させると、ブラウザが長さを確定する。確かめられなければ null。
+ */
+async function resolveDuration(video: HTMLVideoElement): Promise<number | null> {
+  if (Number.isFinite(video.duration) && video.duration > 0) return video.duration;
+  await new Promise<void>((resolve) => {
+    let done = false;
+    const cleanup = () => {
+      video.removeEventListener("durationchange", check);
+      video.removeEventListener("timeupdate", check);
+    };
+    const finish = () => {
+      if (done) return;
+      done = true;
+      cleanup();
+      resolve();
+    };
+    const check = () => {
+      if (Number.isFinite(video.duration) && video.duration > 0) finish();
+    };
+    video.addEventListener("durationchange", check);
+    video.addEventListener("timeupdate", check);
+    try {
+      video.currentTime = 1e101;
+    } catch {
+      finish();
+    }
+    window.setTimeout(finish, 4000);
+  });
+  const duration = video.duration;
+  if (!Number.isFinite(duration) || duration <= 0) return null;
+  await seekVideoTo(video, 0);
+  return duration;
+}
+
+/**
  * 動画（Blob URL など）から、等間隔に最大 count 枚の静止画を切り出す。
- * 一般検査モードの AI解析で使う（動画の複数フレームを解析して集約し、
- * 1フレームだけの偶然やスタッフの主観に寄らない結果にするため）。
+ * 鮮明な場面を選ぶ切り出し（captureSharpestFramesFromVideoUrl）が使えないときの予備。
  * 切り出し位置は (i + 0.5) / count の地点。長さが取れない形式では
  * 先頭フレーム1枚だけを返す。対象は同一オリジンで読める URL に限る。
  */
@@ -338,8 +381,8 @@ export async function captureFramesFromVideoUrl(
       video.onerror = () => reject(new Error("動画を読み込めませんでした"));
     });
     await waitVideoReady(video);
-    const duration = video.duration;
-    if (!Number.isFinite(duration) || duration <= 0) {
+    const duration = await resolveDuration(video);
+    if (duration == null) {
       return [await captureFromVideo(video)];
     }
     const frames: CapturedImage[] = [];
@@ -352,6 +395,98 @@ export async function captureFramesFromVideoUrl(
       frames.push(await captureFromVideo(video));
     }
     return frames;
+  } finally {
+    video.removeAttribute("src");
+    video.load();
+  }
+}
+
+/* ============ 動画から鮮明な場面を選んで切り出す ============ */
+
+export type SharpFrame = {
+  image: CapturedImage;
+  /** 動画の中の位置（秒）。 */
+  timeSec: number;
+  /** その場面の画質の目安（測れなかったときは null）。 */
+  quality: ImageQuality | null;
+};
+
+export type SharpFrames = {
+  /** 選んだ場面（時間の順）。 */
+  frames: SharpFrame[];
+  /** 画質を見比べた場面の数。長さが分からず先頭の1枚だけになったときは 1。 */
+  sampled: number;
+};
+
+/** 見比べるときの縮小幅（画質の目安はこの大きさで測る）。 */
+const SCAN_WIDTH = 400;
+/** 見比べる場面の数の既定。多いほど良い場面を拾えるが、時間がかかる。 */
+export const SHARP_FRAME_SAMPLES = 16;
+
+/**
+ * 動画の中から、形と本数を読み取りやすい場面を選んで静止画にする。
+ * 等間隔に samples か所の画質（imageQuality.ts）を測り、点数の高い順に count 枚を切り出す。
+ * 動画は手ぶれやピントの揺れで場面ごとに鮮明さが違うので、決まった位置で切り出すより確か。
+ * 対象は同一オリジンで読める URL（Blob URL）に限る。
+ */
+export async function captureSharpestFramesFromVideoUrl(
+  src: string,
+  count: number,
+  samples: number = SHARP_FRAME_SAMPLES,
+): Promise<SharpFrames> {
+  const video = document.createElement("video");
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = "auto";
+  video.src = src;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      video.onloadedmetadata = () => resolve();
+      video.onerror = () => reject(new Error("動画を読み込めませんでした"));
+    });
+    await waitVideoReady(video);
+    const duration = await resolveDuration(video);
+    if (duration == null) {
+      return {
+        frames: [{ image: await captureFromVideo(video), timeSec: 0, quality: null }],
+        sampled: 1,
+      };
+    }
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.min(SCAN_WIDTH, vw || SCAN_WIDTH);
+    canvas.height = Math.max(1, Math.round((canvas.width * (vh || 1)) / (vw || 1)));
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    const n = Math.max(count, Math.round(samples));
+    const times: number[] = [];
+    const qualities: (ImageQuality | null)[] = [];
+    for (let i = 0; i < n; i++) {
+      const target = Math.min(((i + 0.5) / n) * duration, Math.max(0, duration - 0.05));
+      if (target > 0) await seekVideoTo(video, target);
+      let quality: ImageQuality | null = null;
+      try {
+        if (ctx) {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          quality = assessImageQuality(ctx.getImageData(0, 0, canvas.width, canvas.height));
+        }
+      } catch {
+        // 画素を読めない環境では、点数なし（等間隔の切り出しと同じ結果になる）。
+      }
+      times.push(target);
+      qualities.push(quality);
+    }
+    const picked = pickBestIndexes(qualities.map(frameScore), count);
+    const frames: SharpFrame[] = [];
+    for (const i of picked) {
+      if (times[i] > 0) await seekVideoTo(video, times[i]);
+      frames.push({
+        image: await captureFromVideo(video),
+        timeSec: times[i],
+        quality: qualities[i],
+      });
+    }
+    return { frames, sampled: n };
   } finally {
     video.removeAttribute("src");
     video.load();

@@ -113,6 +113,40 @@ export function qualityAdvice(issues: QualityIssue[]): string[] {
   return issues.map((i) => ADVICE[i]);
 }
 
+/**
+ * 動画の場面どうしを比べるための点数（大きいほど、形と本数を読み取りやすい場面）。
+ * ピントの値を基本にして、血管がほとんど写っていない場面・反射の多い場面・
+ * 暗すぎる／明るすぎる場面は点数を下げる。同じ動画の中で比べるためだけの値。
+ */
+export function frameScore(q: ImageQuality | null): number {
+  if (!q) return 0;
+  let score = q.sharpness;
+  score *= Math.min(1, q.vesselContrast / QUALITY_LIMITS.vesselContrastMin);
+  score *= 1 - Math.min(0.5, q.glarePct / 20);
+  if (q.brightness < QUALITY_LIMITS.brightnessMin || q.brightness > QUALITY_LIMITS.brightnessMax) {
+    score *= 0.7;
+  }
+  return score;
+}
+
+/**
+ * 点数の高い順に count 個を選ぶ（返すのは元の並びでの番号、時間の順）。
+ * となり合う場面はほぼ同じ絵なので、できるだけ間をあけて選ぶ。足りなければ、となりも使う。
+ */
+export function pickBestIndexes(scores: number[], count: number, minGap = 2): number[] {
+  const order = scores.map((_, i) => i).sort((a, b) => scores[b] - scores[a] || a - b);
+  const chosen: number[] = [];
+  for (const i of order) {
+    if (chosen.length >= count) break;
+    if (chosen.every((j) => Math.abs(i - j) >= minGap)) chosen.push(i);
+  }
+  for (const i of order) {
+    if (chosen.length >= count) break;
+    if (!chosen.includes(i)) chosen.push(i);
+  }
+  return chosen.sort((a, b) => a - b);
+}
+
 /** 記録に残す形（値と版だけ）。 */
 export type StoredImageQuality = {
   version: string;
