@@ -271,6 +271,12 @@ interface AiPatternCandidate {
   code: string;
   confidence: AiConfidence;
   reason: string;
+  /**
+   * その特徴が最もよく見える画像内の代表点。画像の左上を原点とする
+   * パーセント座標（x: 左端0〜右端100、y: 上端0〜下端100）。
+   * AIが位置を特定できない候補では null。
+   */
+  location: { x: number; y: number } | null;
 }
 
 interface AnalyzeImageResult {
@@ -290,9 +296,23 @@ function buildAnalysisPrompt(): string {
     "添付した爪郭毛細血管の撮影画像を見て、この一覧の中で画像に最も近い形の候補を最大4件まで挙げてください。",
     "候補がない場合は、無理に選ばず空にしてください。",
     "各候補には、確からしさ（high / medium / low のいずれか）と、そう見える理由（画像のどこがどう見えるか）を付けてください。",
+    "各候補には、その特徴が最もよく見える画像内の代表点の位置を location として付けてください。location は {\"x\": 数値, \"y\": 数値} の形で、x は画像の左端を0・右端を100、y は上端を0・下端を100とするパーセントです。位置を特定できない候補では location を null にしてください。",
     "これは診断ではありません。病名の断定や、疾患がある・ないの判断はしないでください。「最も近い形」の候補提示だけを行ってください。",
-    '出力は次の形式の JSON のみとしてください: {"candidates": [{"code": "コード", "confidence": "high", "reason": "理由"}]}',
+    '出力は次の形式の JSON のみとしてください: {"candidates": [{"code": "コード", "confidence": "high", "reason": "理由", "location": {"x": 50, "y": 30}}]}',
   ].join("\n");
+}
+
+/**
+ * AI応答の location を検証する。{x, y} ともに有限の数値のときだけ採用し、
+ * 0〜100 の範囲に収める（クランプ）。数値でない・欠けている場合は null。
+ */
+function parseLocation(raw: unknown): { x: number; y: number } | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const { x, y } = raw as Record<string, unknown>;
+  if (typeof x !== "number" || typeof y !== "number") return null;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  const clampPct = (v: number): number => Math.max(0, Math.min(100, v));
+  return { x: clampPct(x), y: clampPct(y) };
 }
 
 /**
@@ -406,7 +426,10 @@ export const analyzeImagePatterns = onCall<
     for (const raw of rawCandidates) {
       if (candidates.length >= MAX_CANDIDATES) break;
       if (typeof raw !== "object" || raw === null) continue;
-      const { code, confidence, reason } = raw as Record<string, unknown>;
+      const { code, confidence, reason, location } = raw as Record<
+        string,
+        unknown
+      >;
       if (typeof code !== "string" || !PATTERN_CODE_SET.has(code)) continue;
       if (candidates.some((c) => c.code === code)) continue;
       candidates.push({
@@ -421,6 +444,7 @@ export const analyzeImagePatterns = onCall<
           typeof reason === "string"
             ? reason.slice(0, MAX_REASON_LENGTH)
             : "",
+        location: parseLocation(location),
       });
     }
 

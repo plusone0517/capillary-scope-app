@@ -785,6 +785,9 @@ function NewScreen({ go, trialMode }: { go: (v: View) => void; trialMode: boolea
                 (images[primaryIndex] ?? images[0])?.previewUrl ?? null
               }
               aiImageAvailable={images.length > 0}
+              aiImageUrl={
+                (images[primaryIndex] ?? images[0])?.previewUrl ?? null
+              }
               onAskAi={async () => {
                 // 対象は編集中のドラフトの主画像1枚。画像だけを送る。
                 const img = images[primaryIndex] ?? images[0];
@@ -1344,6 +1347,10 @@ function EditScreen({
               }
               calibrationUmPerPx={obs.calibrationUmPerPx}
               aiImageAvailable={obs.images.length > 0}
+              aiImageUrl={
+                (obs.images.find((img) => img.isPrimary) ?? obs.images[0])
+                  ?.url ?? null
+              }
               onAskAi={async () => {
                 // 対象は保存済みの主画像1枚（id = Storage パス）。
                 // Storage から読み出して base64 化し、画像だけを送る。

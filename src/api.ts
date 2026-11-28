@@ -195,6 +195,12 @@ export type AiPatternCandidate = {
   confidence: "high" | "medium" | "low";
   /** そう見える理由（画像のどこがどう見えるか）。 */
   reason: string;
+  /**
+   * その特徴が見える代表点。画像の左上を原点とするパーセント座標
+   * （x: 左端0〜右端100、y: 上端0〜下端100）。AIが位置を特定できない
+   * 候補では null。旧い応答では欠ける場合があるため任意項目。
+   */
+  location?: { x: number; y: number } | null;
 };
 
 export type AnalyzeImagePatternsResult = {

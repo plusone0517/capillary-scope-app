@@ -14,6 +14,7 @@ type ClinicalFlagKey,
 } from "./patterns";
 import { PatternDiagram } from "./PatternDiagram";
 import { AutoMeasurePanel } from "./AutoMeasurePanel";
+import { AnnotatedImage, type AnnotationItem } from "./AnnotatedImage";
 import {
   gasTypes,
   interventionCategories,
@@ -154,6 +155,11 @@ const aiConfidenceLabels: Record<AiPatternCandidate["confidence"], string> = {
   low: "低",
 };
 
+/** パターンの番号（定義順の 1〜28）。注釈一覧の「No.」表示に使う。 */
+const patternNumberByCode: Record<string, number> = Object.fromEntries(
+  capillaryPatterns.map((p, i) => [p.code, i + 1]),
+);
+
 export function FindingsForm({
   value,
   onChange,
@@ -161,6 +167,7 @@ export function FindingsForm({
   trialMode = false,
   aiImageAvailable = false,
   onAskAi,
+  aiImageUrl = null,
   measureImageUrl = null,
   calibrationUmPerPx = null,
 }: {
@@ -179,6 +186,12 @@ export function FindingsForm({
    * AI は候補を提示するだけで、選択状態はここでは変えない。
    */
   onAskAi?: () => Promise<AnalyzeImagePatternsResult>;
+  /**
+   * AI解析の対象にした主画像そのものの表示用URL。候補が返ったときに、
+   * 元画像へ番号マーカーを重ねた注釈表示を出すために使う。
+   * 新規作成ではドラフト主画像のプレビュー、編集では保存済み主画像のURL。
+   */
+  aiImageUrl?: string | null;
   /** 自動計測（試作）の対象になる代表画像のURL。画像が無い場合は null。 */
   measureImageUrl?: string | null;
   /** 保存済みの較正値（μm/px）。自動計測パネルの初期値にする。 */
@@ -264,6 +277,29 @@ export function FindingsForm({
     togglePattern(code);
     setOpenCode(code);
   };
+
+  // AI候補の注釈表示用データ。対象画像があるときは、元画像に番号マーカーを
+  // 重ね、「番号 → パターンの番号・名前＋理由」の一覧で出す。
+  // location が null の候補はマーカーなしで一覧にだけ出す。
+  const aiAnnotations: AnnotationItem[] = aiCandidates.flatMap((candidate) => {
+    const p = capillaryPatternByCode[candidate.code];
+    if (!p) return [];
+    const selected = value.patterns.includes(candidate.code);
+    return [
+      {
+        id: `ai-${candidate.code}`,
+        x: candidate.location?.x ?? null,
+        y: candidate.location?.y ?? null,
+        clinical: p.clinical,
+        heading: `No.${patternNumberByCode[candidate.code] ?? "―"} ${p.name}（AI候補・確からしさ：${aiConfidenceLabels[candidate.confidence]}）`,
+        comment: candidate.reason || undefined,
+        statusLabel: selected ? "選択中" : undefined,
+        hint: "押すと選択／解除できます。",
+        selected,
+        onPress: () => handleCandidate(candidate.code),
+      },
+    ];
+  });
 
   // 説明パネル本体。グリッドの中で、開いたタイルの行末の直後に
   // 全幅（col-span-full）で差し込む。×で閉じても選択は変わらない。
@@ -522,7 +558,20 @@ export function FindingsForm({
                 AIから候補は提示されませんでした。実写と見比べて選んでください。
               </p>
             )}
-            {aiCandidates.length > 0 && (
+            {aiCandidates.length > 0 && aiImageUrl && (
+              <div className="flex flex-col gap-2">
+                <p className="text-base leading-relaxed text-[var(--dim)]">
+                  番号は、AIがその形の特徴が見えるとした場所です。マーカーを押すと、対応する候補が下の一覧で強調されます。場所が特定できなかった候補は、一覧にだけ出ます。
+                </p>
+                <AnnotatedImage
+                  imageUrl={aiImageUrl}
+                  imageAlt="AI解析の対象にした主画像（番号マーカーつき）"
+                  items={aiAnnotations}
+                  listLabel="AIの候補（番号つき）"
+                />
+              </div>
+            )}
+            {aiCandidates.length > 0 && !aiImageUrl && (
               <ul className="flex flex-col gap-2" aria-label="AIの候補">
                 {aiCandidates.map((candidate) => {
                   const p = capillaryPatternByCode[candidate.code];

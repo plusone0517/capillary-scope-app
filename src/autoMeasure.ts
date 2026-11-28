@@ -24,6 +24,13 @@
 export type AutoMeasureResult = {
   /** 数えたループの本数。 */
   loopCount: number;
+  /**
+   * 数えたループごとの代表点（解析サイズのピクセル座標、左から順）。
+   * 注釈表示で元画像に番号マーカーを付け、一覧と対応づけるために使う。
+   * widthPx はそのループの幅（元の静止画のピクセル）。対になる血管が
+   * 無く幅を測れなかったループは null。
+   */
+  loopPoints: { x: number; y: number; widthPx: number | null }[];
   /** 密度（本/mm）。較正値がある場合のみ。 */
   densityPerMm: number | null;
   /** ループ幅の平均（元の静止画のピクセル）。 */
@@ -537,6 +544,28 @@ export async function analyzeCapillaryImage(
       widthsAnalysisPx.length > 0
         ? widthsAnalysisPx.reduce((a, c) => a + c, 0) / widthsAnalysisPx.length
         : 0;
+
+    // 数えたループの代表点（解析サイズのピクセル座標）。2本1組のループは
+    // 外側どうしの中点、相方が無い端の1本はその中心に置く。
+    // 幅はループ幅と同じく、元の静止画のピクセルに換算して持つ。
+    const loopPoints: { x: number; y: number; widthPx: number | null }[] = [];
+    for (let i = 0; i < runs.length; i += 2) {
+      const a = runs[i] as { start: number; end: number };
+      const b = runs[i + 1];
+      if (b) {
+        loopPoints.push({
+          x: (a.start + b.end) / 2,
+          y: scanY,
+          widthPx: (b.end - a.start + 1) / scale,
+        });
+      } else {
+        loopPoints.push({
+          x: (a.start + a.end) / 2,
+          y: scanY,
+          widthPx: null,
+        });
+      }
+    }
     const loopWidthPx = meanWidthAnalysisPx / scale;
     // 較正値は元の静止画の1ピクセルあたり。幅は元のピクセルに戻してから掛ける。
     const loopWidthUm =
@@ -607,6 +636,7 @@ export async function analyzeCapillaryImage(
       ok: true,
       result: {
         loopCount,
+        loopPoints,
         densityPerMm,
         loopWidthPx,
         loopWidthUm,

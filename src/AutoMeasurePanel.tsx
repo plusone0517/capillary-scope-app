@@ -8,6 +8,18 @@ import {
   analyzeCapillaryImage,
   type AutoMeasureResult,
 } from "./autoMeasure";
+import { AnnotatedImage, type AnnotationItem } from "./AnnotatedImage";
+
+/** 注釈表示でマーカーを付けるループの上限（多すぎると見づらいため）。 */
+const MAX_LOOP_MARKERS = 12;
+
+type ViewMode = "annotated" | "overlay" | "original";
+
+const viewModeLabels: Record<ViewMode, string> = {
+  annotated: "番号つきで表示",
+  overlay: "抽出を重ねて表示",
+  original: "元の画像",
+};
 
 type Props = {
   /** 解析対象の代表画像のURL。画像がまだ無い場合は null。 */
@@ -33,7 +45,8 @@ export function AutoMeasurePanel({
     savedCalibrationUmPerPx != null ? String(savedCalibrationUmPerPx) : "",
   );
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
-  const [showOverlay, setShowOverlay] = useState(true);
+  // 既定は注釈モード（元画像に番号マーカー）。抽出のベタ塗りは確認用に残す。
+  const [view, setView] = useState<ViewMode>("annotated");
   const [appliedNote, setAppliedNote] = useState<string | null>(null);
   const [originalUrl, setOriginalUrl] = useState<string | null>(null);
   const [overlayUrl, setOverlayUrl] = useState<string | null>(null);
@@ -71,11 +84,32 @@ export function AutoMeasurePanel({
     }
     setOriginalUrl(outcome.result.originalCanvas.toDataURL("image/jpeg", 0.85));
     setOverlayUrl(outcome.result.overlayCanvas.toDataURL("image/jpeg", 0.85));
-    setShowOverlay(true);
+    setView("annotated");
     setPhase({ kind: "done", result: outcome.result });
   };
 
   const result = phase.kind === "done" ? phase.result : null;
+
+  // 注釈表示用：数えたループの代表点を、元画像に対するパーセント座標に
+  // 直して番号マーカーにする。マーカーが多すぎる場合は左から上限まで。
+  const loopAnnotations: AnnotationItem[] = result
+    ? result.loopPoints.slice(0, MAX_LOOP_MARKERS).map((pt, i) => {
+        const cw = result.originalCanvas.width;
+        const ch = result.originalCanvas.height;
+        return {
+          id: `loop-${i}`,
+          x: cw > 0 ? (pt.x / cw) * 100 : null,
+          y: ch > 0 ? (pt.y / ch) * 100 : null,
+          heading: "計測したループ",
+          comment:
+            pt.widthPx != null
+              ? `密度を数える根拠にしたループです。このループの幅は約${pt.widthPx.toFixed(0)}ピクセルでした。`
+              : "密度を数える根拠にしたループです。",
+        };
+      })
+    : [];
+  const loopMarkersTruncated =
+    result != null && result.loopPoints.length > MAX_LOOP_MARKERS;
 
   return (
     <div className="flex flex-col gap-3 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-card)]">
@@ -83,7 +117,7 @@ export function AutoMeasurePanel({
         自動計測（試作・参考値）
       </h3>
       <p className="text-base leading-relaxed text-[var(--text)]">
-        代表画像から、画像処理で密度・ループの太さ・蛇行の目安を推定します。計算はこの端末の中で行い、画像を外部に送ることはありません。抽出結果の重ね表示と元の画像を見比べて、合っている場合だけお使いください。
+        代表画像から、画像処理で密度・ループの太さ・蛇行の目安を推定します。計算はこの端末の中で行い、画像を外部に送ることはありません。数えたループに番号を付けた表示や抽出の重ね表示と、元の画像を見比べて、合っている場合だけお使いください。
       </p>
 
       {imageUrl == null ? (
@@ -169,44 +203,64 @@ export function AutoMeasurePanel({
 
           {(originalUrl || overlayUrl) && (
             <div className="flex flex-col gap-2">
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  aria-pressed={showOverlay}
-                  onClick={() => setShowOverlay(true)}
-                  className={`min-h-11 rounded-full px-4 text-base font-medium ${
-                    showOverlay
-                      ? "bg-[var(--accent)] font-bold text-white"
-                      : "border border-[var(--border)] bg-[var(--surface)] text-[var(--text)]"
-                  }`}
-                >
-                  抽出を重ねて表示
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={!showOverlay}
-                  onClick={() => setShowOverlay(false)}
-                  className={`min-h-11 rounded-full px-4 text-base font-medium ${
-                    !showOverlay
-                      ? "bg-[var(--accent)] font-bold text-white"
-                      : "border border-[var(--border)] bg-[var(--surface)] text-[var(--text)]"
-                  }`}
-                >
-                  元の画像
-                </button>
+              <div
+                className="flex flex-wrap gap-2"
+                role="group"
+                aria-label="画像の表示方法"
+              >
+                {(Object.keys(viewModeLabels) as ViewMode[]).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    aria-pressed={view === mode}
+                    onClick={() => setView(mode)}
+                    className={`min-h-11 rounded-full px-4 text-base font-medium ${
+                      view === mode
+                        ? "bg-[var(--accent)] font-bold text-white"
+                        : "border border-[var(--border)] bg-[var(--surface)] text-[var(--text)]"
+                    }`}
+                  >
+                    {viewModeLabels[mode]}
+                  </button>
+                ))}
               </div>
-              <img
-                src={(showOverlay ? overlayUrl : originalUrl) ?? undefined}
-                alt={
-                  showOverlay
-                    ? "抽出された血管を重ねた確認用画像"
-                    : "解析に使った元の画像"
-                }
-                className="w-full rounded-[var(--radius)] border border-[var(--border)] bg-[var(--video-bg)]"
-              />
-              <p className="text-base text-[var(--dim)]">
-                重ね表示では、抽出した血管が青緑色、数えた位置が黄色の線と点で示されます。実際の血管と重なりが合っているか確認してください。
-              </p>
+              {view === "annotated" && originalUrl ? (
+                <>
+                  <AnnotatedImage
+                    imageUrl={originalUrl}
+                    imageAlt="解析に使った元の画像（計測したループに番号マーカー）"
+                    items={loopAnnotations}
+                    listLabel="計測したループの一覧"
+                  />
+                  {loopMarkersTruncated && (
+                    <p className="text-base text-[var(--dim)]">
+                      マーカーと一覧は左から{MAX_LOOP_MARKERS}
+                      件までを表示しています（数えたループは全部で
+                      {result.loopCount}本です）。
+                    </p>
+                  )}
+                  <p className="text-base text-[var(--dim)]">
+                    番号は、密度を数える根拠にしたループの位置です。マーカーを押すと、対応する項目が下の一覧で強調されます。実際の血管と合っているか確認してください。
+                  </p>
+                </>
+              ) : (
+                <>
+                  <img
+                    src={(view === "overlay" ? overlayUrl : originalUrl) ?? undefined}
+                    alt={
+                      view === "overlay"
+                        ? "抽出された血管を重ねた確認用画像"
+                        : "解析に使った元の画像"
+                    }
+                    className="w-full rounded-[var(--radius)] border border-[var(--border)] bg-[var(--video-bg)]"
+                  />
+                  {view === "overlay" && (
+                    <p className="text-base text-[var(--dim)]">
+                      重ね表示では、抽出した血管が青緑色、数えた位置が黄色の線と点で示されます。実際の血管と重なりが合っているか確認してください。
+                    </p>
+                  )}
+                </>
+              )}
             </div>
           )}
 
