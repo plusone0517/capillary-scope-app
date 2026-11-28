@@ -24,6 +24,7 @@ import {
   describeFirebaseError,
   type AiPatternCandidate,
   type AnalyzeImagePatternsResult,
+  type DraftReportTextResult,
 } from "./api";
 
 export type InterventionDraft = {
@@ -170,6 +171,7 @@ export function FindingsForm({
   aiImageUrl = null,
   measureImageUrl = null,
   calibrationUmPerPx = null,
+  onDraftReport,
 }: {
   value: FindingsState;
   onChange: (next: FindingsState) => void;
@@ -196,6 +198,12 @@ export function FindingsForm({
   measureImageUrl?: string | null;
   /** 保存済みの較正値（μm/px）。自動計測パネルの初期値にする。 */
   calibrationUmPerPx?: number | null;
+  /**
+   * AIによるレポート文の下書き（試作）。現在の所見から「所見のまとめ」と
+   * 「アドバイス」の下書きを作る（親側で Functions を呼ぶ）。
+   * AI は下書きを作るだけで、内容の確定と保存はスタッフが行う。
+   */
+  onDraftReport?: () => Promise<DraftReportTextResult>;
 }) {
   const set = (patch: Partial<FindingsState>) => onChange({ ...value, ...patch });
 
@@ -278,6 +286,35 @@ export function FindingsForm({
     setOpenCode(code);
   };
 
+  // AIによるレポート文の下書き（試作）の状態。下書きは「所見のまとめ」欄と
+  // 「アドバイスメモ」欄に入れるだけで、保存は通常の保存操作で行う
+  // （AIが自動で確定することはしない）。
+  const [draftStatus, setDraftStatus] = useState<
+    "idle" | "loading" | "done" | "not-configured" | "error"
+  >("idle");
+  const [draftError, setDraftError] = useState<string | null>(null);
+
+  const handleDraftReport = async () => {
+    if (!onDraftReport || draftStatus === "loading") return;
+    setDraftStatus("loading");
+    setDraftError(null);
+    try {
+      const res = await onDraftReport();
+      if (!res.configured) {
+        setDraftStatus("not-configured");
+        return;
+      }
+      set({
+        summary: res.summary || value.summary,
+        adviceMemo: res.advice || value.adviceMemo,
+      });
+      setDraftStatus("done");
+    } catch (e) {
+      setDraftStatus("error");
+      setDraftError(`下書きを作れませんでした：${describeFirebaseError(e)}`);
+    }
+  };
+
   // AI候補の注釈表示用データ。対象画像があるときは、元画像に番号マーカーを
   // 重ね、「番号 → パターンの番号・名前＋理由」の一覧で出す。
   // location が null の候補はマーカーなしで一覧にだけ出す。
@@ -291,6 +328,7 @@ export function FindingsForm({
         x: candidate.location?.x ?? null,
         y: candidate.location?.y ?? null,
         clinical: p.clinical,
+        shortLabel: p.name,
         heading: `No.${patternNumberByCode[candidate.code] ?? "―"} ${p.name}（AI候補・確からしさ：${aiConfidenceLabels[candidate.confidence]}）`,
         comment: candidate.reason || undefined,
         statusLabel: selected ? "選択中" : undefined,
@@ -719,18 +757,68 @@ export function FindingsForm({
         className="flex scroll-mt-32 flex-col gap-4 lg:scroll-mt-4"
       >
         <h2 className="text-xl font-bold text-[var(--text)]">5. まとめとアドバイス</h2>
-        {/* 本番のデータモデルでは、所見のまとめは保存せず、レポート表示時に
-            所見から組み立てる（models.ts の Report の方針）。ここでは
-            組み立て結果のプレビューだけを示す。「次回について」も
-            レポート側で標準文を表示する。 */}
-        <div className="flex flex-col gap-1">
-          <p className="text-base font-medium text-[var(--text)]">
-            所見のまとめ（レポートに自動で組み立てられます）
-          </p>
-          <p className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--paper)] px-3 py-3 text-lg leading-relaxed text-[var(--text)]">
-            {autoSummary}
-          </p>
-        </div>
+        {/* 所見のまとめは、表示時に所見から組み立てるのが原則。スタッフが
+            下の欄に文を書いた場合（AIの下書きを手直しした場合を含む）は、
+            その文を summaryNote として保存し、レポートではそちらを優先する。
+            「次回について」はレポート側で標準文を表示する。 */}
+        {onDraftReport && (
+          <div className="flex flex-col gap-2 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--paper)] p-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                disabled={draftStatus === "loading"}
+                onClick={() => void handleDraftReport()}
+                className="min-h-14 rounded-[var(--radius)] border-2 border-[var(--accent)] bg-[var(--surface)] px-5 text-lg font-bold text-[var(--accent-strong)] disabled:opacity-40"
+              >
+                {draftStatus === "loading"
+                  ? "AIが下書きを作っています…"
+                  : "AIで下書きを作る（試作）"}
+              </button>
+            </div>
+            <p className="text-sm leading-relaxed text-[var(--dim)]">
+              AIが、入力した所見から「所見のまとめ」と「アドバイス」の下書きを作り、下の欄に入れます。下書きはそのまま使わず、内容を確認して手直ししてから保存してください。送信するのは所見の内容だけで、氏名やIDは送りません。
+            </p>
+            {draftStatus === "not-configured" && (
+              <p className="text-base text-[var(--text)]">
+                AIの下書きはまだ設定されていません。
+              </p>
+            )}
+            {draftStatus === "error" && draftError && (
+              <p role="alert" className="text-base font-medium text-[var(--alert)]">
+                {draftError}
+              </p>
+            )}
+            {draftStatus === "done" && (
+              <p className="text-base font-medium text-[var(--accent-strong)]">
+                下書きを下の欄に入れました。内容を確認し、必要に応じて手直ししてください。
+              </p>
+            )}
+          </div>
+        )}
+        {value.summary.trim() === "" && (
+          <div className="flex flex-col gap-1">
+            <p className="text-base font-medium text-[var(--text)]">
+              所見のまとめ（自動で組み立てた文）
+            </p>
+            <p className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--paper)] px-3 py-3 text-lg leading-relaxed text-[var(--text)]">
+              {autoSummary}
+            </p>
+            <p className="text-base text-[var(--dim)]">
+              下の欄が空のまま保存すると、この文がレポートに表示されます。
+            </p>
+          </div>
+        )}
+        <label className={labelClass}>
+          所見のまとめ（手直し用・任意）
+          <textarea
+            aria-label="所見のまとめ"
+            className={`${inputClass} min-h-28 py-3`}
+            rows={4}
+            value={value.summary}
+            onChange={(e) => set({ summary: e.target.value })}
+            placeholder="ここに書くと、この文がレポートの「所見のまとめ」に表示されます。空にすると自動で組み立てた文に戻ります。"
+          />
+        </label>
         <label className={labelClass}>
           アドバイスメモ
           <textarea

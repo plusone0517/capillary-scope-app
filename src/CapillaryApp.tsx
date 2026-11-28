@@ -341,6 +341,7 @@ function findingsToPayload(f: FindingsState) {
       ? (f.changeVsPrev as NonNullable<CreateArgs["changeVsPrev"]>)
       : undefined,
     adviceMemo: f.adviceMemo.trim() ? f.adviceMemo : undefined,
+    summaryNote: f.summary.trim() ? f.summary : undefined,
     referralGiven: f.referralGiven,
     trialName: f.trialName.trim() ? f.trialName.trim() : undefined,
     trialGroup: f.trialGroup.trim() ? f.trialGroup.trim() : undefined,
@@ -353,6 +354,24 @@ function findingsToPayload(f: FindingsState) {
       detail: iv.detail,
       timing: iv.timing as NonNullable<CreateArgs["interventions"]>[number]["timing"],
     })),
+  };
+}
+
+/** AI下書き（試作）へ渡す所見。フォームの現在値から組み立てる。 */
+function draftArgsFromForm(f: FindingsState) {
+  const t = f.densityPerMm.trim();
+  const n = t ? Number(t) : NaN;
+  return {
+    finger: f.finger,
+    densityPerMm: Number.isFinite(n) ? n : null,
+    flow: f.flow ? f.flow : null,
+    color: f.color ? f.color : null,
+    patterns: f.patterns,
+    flagGiant: f.flags.giant,
+    flagHemorrhage: f.flags.hemorrhage,
+    flagLoss: f.flags.loss,
+    flagRamified: f.flags.ramified,
+    changeVsPrev: f.changeVsPrev ? f.changeVsPrev : null,
   };
 }
 
@@ -796,6 +815,9 @@ function NewScreen({ go, trialMode }: { go: (v: View) => void; trialMode: boolea
                   image: { dataBase64: img.dataBase64, mimeType: img.mimeType },
                 });
               }}
+              onDraftReport={async () =>
+                api.draftReportText(draftArgsFromForm(form))
+              }
             />
           </div>
           {error && (
@@ -1104,7 +1126,9 @@ function EditScreen({
         },
         patterns: obs.patterns,
         changeVsPrev: obs.changeVsPrev ?? "",
-        summary: obs.summary ?? "",
+        // まとめ欄には手直し済みの保存値だけを入れる（自動組立の文は
+        // フォーム側でプレビュー表示し、欄が空ならそちらが使われる）。
+        summary: obs.summaryNote ?? "",
         adviceMemo: obs.adviceMemo ?? "",
         nextNote: obs.nextNote ?? "",
         referralGiven: obs.referralGiven,
@@ -1360,6 +1384,9 @@ function EditScreen({
                 const image = await api.fetchStoredImageInput(primary.id);
                 return api.analyzeImagePatterns({ image });
               }}
+              onDraftReport={async () =>
+                api.draftReportText(draftArgsFromForm(form))
+              }
             />
           </div>
 
@@ -1497,6 +1524,7 @@ function MeasureScreen({ id, go }: { id: string; go: (v: View) => void }) {
     <FlowMeasure
       observationId={id}
       videoUrl={obs.video.url}
+      videoStoragePath={obs.video.storagePath}
       initialCalibrationUmPerPx={obs.calibrationUmPerPx}
       savedResult={
         obs.flowSpeedPxPerSec != null

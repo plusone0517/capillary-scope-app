@@ -14,9 +14,11 @@
 // - 室温・安静時間が未入力の回は conditions に null を入れる（未記録を
 //   数値で偽らないため。models.ts の型は number だが、実データでは
 //   「記録なし」を表す必要があるため、この2項目だけ null を許容する）。
-// - 所見のまとめ（summary）は保存せず、表示時に所見から組み立てる
+// - 所見のまとめ（summary）は原則として表示時に所見から組み立てる
 //   （models.ts の Report の方針「表示内容は観察データから都度組み立てる」）。
-//   次回について（nextNote）も標準文を表示時に組み立てる。
+//   ただしスタッフが手直しした文（AIの下書きを直した場合を含む）は
+//   observations.summaryNote に保存し、表示時はそちらを優先する。
+//   次回について（nextNote）は標準文を表示時に組み立てる。
 // - 動画の長さ（durationSec）は MediaRef に項目がないため保存しない（null を返す）。
 // - 血流速度の校正値と px/秒は FlowVelocity.note に機械可読な形で保持する
 //   （note = "pxPerSec=<値>;umPerPx=<値>"）。表示用の値は value/unit が正。
@@ -124,8 +126,13 @@ export type ObservationRecord = {
   changeVsPrev: string | null;
   adviceMemo: string | null;
   referralGiven: boolean;
-  /** 表示時に所見から組み立てる（保存はしない）。 */
+  /**
+   * レポートに表示する「所見のまとめ」。スタッフが手直しした保存値
+   * （summaryNote）があればそれ、なければ表示時に所見から組み立てる。
+   */
   summary: string | null;
+  /** スタッフが手直しした「所見のまとめ」の保存値。未保存は null。 */
+  summaryNote: string | null;
   /** 表示時に組み立てる標準文。 */
   nextNote: string | null;
   status: string;
@@ -209,6 +216,16 @@ export type AnalyzeImagePatternsResult = {
   candidates: AiPatternCandidate[];
 };
 
+/** AIによるレポート文の下書き（試作）の結果。Functions の draftReportText の戻り値。 */
+export type DraftReportTextResult = {
+  /** APIキーが未設定のときは false（エラーではなく未設定として扱う）。 */
+  configured: boolean;
+  /** 所見のまとめの下書き。 */
+  summary: string;
+  /** アドバイスの下書き。 */
+  advice: string;
+};
+
 export type VideoInput = {
   /**
    * 動画の実体。Blob があればそのままアップロードする（base64 化しないため、
@@ -246,6 +263,8 @@ export type ObservationInput = {
   patterns: string[];
   changeVsPrev?: string;
   adviceMemo?: string;
+  /** 手直しした「所見のまとめ」。空なら表示時に自動組立する。 */
+  summaryNote?: string;
   referralGiven: boolean;
   trialName?: string;
   trialGroup?: string;
@@ -680,7 +699,11 @@ async function toRecord(
     restrictionsOk: obs.conditions?.restrictionsOk ?? false,
     adviceMemo: obs.adviceNote ? obs.adviceNote : null,
     referralGiven: obs.referralGiven ?? false,
-    summary: buildSummaryText(base),
+    // 手直ししたまとめが保存されていればそれを優先し、なければ自動組立。
+    summary: obs.summaryNote?.trim()
+      ? obs.summaryNote
+      : buildSummaryText(base),
+    summaryNote: obs.summaryNote?.trim() ? obs.summaryNote : null,
     nextNote: STANDARD_NEXT_NOTE,
     status: obs.status,
     finalizedAt: reportInfo?.report.finalizedAt?.toDate
@@ -720,6 +743,7 @@ function observationDataFromInput(
     },
     changeVsPrevious: input.changeVsPrev ?? null,
     adviceNote: input.adviceMemo ?? "",
+    summaryNote: input.summaryNote ?? "",
     referralGiven: input.referralGiven,
     study: buildStudy(input),
     updatedAt: serverTimestamp(),
@@ -1256,6 +1280,90 @@ export const api = {
     return {
       configured: Boolean(res.data?.configured),
       candidates: Array.isArray(res.data?.candidates) ? res.data.candidates : [],
+    };
+  },
+
+  /**
+   * AIによるレポート文の下書き（試作）。
+   * Functions の draftReportText に所見の内容だけを送る（氏名・ID 等は送らない）。
+   * 画面側はコードで受け取り、この層で表示名とパターンの説明文に変換する。
+   * AI は下書きを作るだけで、保存はしない。スタッフが画面で確認・手直し
+   * してから、通常の保存操作で summaryNote / adviceMemo として保存する。
+   * APIキー未設定のときは configured: false が返る（例外にはならない）。
+   */
+  async draftReportText(args: {
+    finger: string;
+    densityPerMm: number | null;
+    flow: string | null;
+    color: string | null;
+    patterns: string[];
+    flagGiant: boolean;
+    flagHemorrhage: boolean;
+    flagLoss: boolean;
+    flagRamified: boolean;
+    changeVsPrev: string | null;
+  }): Promise<DraftReportTextResult> {
+    const flagLabels = (
+      [
+        ["giant", args.flagGiant],
+        ["hemorrhage", args.flagHemorrhage],
+        ["loss", args.flagLoss],
+        ["ramified", args.flagRamified],
+      ] as [ClinicalFlagKey, boolean][]
+    )
+      .filter(([, on]) => on)
+      .map(([k]) => capillaryClinicalFlagLabels[k]);
+    const fn = httpsCallable<
+      {
+        fingerLabel: string;
+        densityPerMm: number | null;
+        flowLabel: string | null;
+        colorLabel: string | null;
+        patterns: {
+          code: string;
+          name: string;
+          feature: string;
+          why: string;
+          symptoms: string;
+          mibyo: string;
+        }[];
+        clinicalFlags: string[];
+        changeVsPrevLabel: string | null;
+      },
+      DraftReportTextResult
+    >(functions, "draftReportText");
+    const res = await fn({
+      fingerLabel: capillaryFingerLabels[args.finger] ?? args.finger,
+      densityPerMm: args.densityPerMm,
+      flowLabel: args.flow
+        ? (capillaryFlowLabels[args.flow] ?? args.flow)
+        : null,
+      colorLabel: args.color
+        ? (capillaryColorLabels[args.color] ?? args.color)
+        : null,
+      patterns: args.patterns.flatMap((code) => {
+        const p = capillaryPatternByCode[code];
+        if (!p) return [];
+        return [
+          {
+            code: p.code,
+            name: p.name,
+            feature: p.feature,
+            why: p.why,
+            symptoms: p.symptoms,
+            mibyo: p.mibyo,
+          },
+        ];
+      }),
+      clinicalFlags: flagLabels,
+      changeVsPrevLabel: args.changeVsPrev
+        ? (capillaryChangeLabels[args.changeVsPrev] ?? args.changeVsPrev)
+        : null,
+    });
+    return {
+      configured: Boolean(res.data?.configured),
+      summary: typeof res.data?.summary === "string" ? res.data.summary : "",
+      advice: typeof res.data?.advice === "string" ? res.data.advice : "",
     };
   },
 

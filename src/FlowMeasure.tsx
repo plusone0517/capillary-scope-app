@@ -35,6 +35,13 @@ type Kymograph = {
 type Props = {
   observationId: string;
   videoUrl: string;
+  /**
+   * 保存済み動画の Storage パス。指定がある場合はダウンロードURLではなく
+   * SDK の認証つき取得（getBlob）で実体を取り、Blob URL にしてから読む。
+   * ダウンロードURLのままだと cross-origin で canvas の画素読み取りが
+   * ブロックされる（SecurityError）ため。
+   */
+  videoStoragePath?: string | null;
   initialCalibrationUmPerPx: number | null;
   savedResult: {
     pxPerSec: number;
@@ -75,7 +82,11 @@ async function loadVideoElement(src: string): Promise<HTMLVideoElement> {
   return video;
 }
 
-/** 動画URLを同一オリジンの Blob URL に変換する（canvas解析のため）。失敗時は元のURL。 */
+/**
+ * 動画URLを同一オリジンの Blob URL に変換する（canvas解析のため）。
+ * 保存済み動画の本命は videoStoragePath 経由の SDK 取得で、これは
+ * Storage パスが無い場合の予備経路。失敗時は元のURLを返す。
+ */
 async function toLocalUrl(url: string): Promise<string> {
   try {
     const res = await fetch(url);
@@ -160,6 +171,7 @@ function estimateSlope(kymo: Kymograph): number | null {
 export function FlowMeasure({
   observationId,
   videoUrl,
+  videoStoragePath = null,
   initialCalibrationUmPerPx,
   savedResult,
   onClose,
@@ -191,8 +203,23 @@ export function FlowMeasure({
     let cancelled = false;
     void (async () => {
       try {
-        const local = await toLocalUrl(videoUrl);
-        if (cancelled) return;
+        // 保存済み動画は Storage から Blob で取得して同一オリジン化する。
+        // 新規ドラフト中の動画（blob: URL）はそのまま使う。
+        let local: string;
+        if (videoStoragePath) {
+          const blob = await api.fetchStoredBlob(videoStoragePath);
+          local = URL.createObjectURL(blob);
+        } else if (videoUrl.startsWith("blob:")) {
+          local = videoUrl;
+        } else {
+          local = await toLocalUrl(videoUrl);
+        }
+        if (cancelled) {
+          if (local.startsWith("blob:") && local !== videoUrl) {
+            URL.revokeObjectURL(local);
+          }
+          return;
+        }
         localUrlRef.current = local;
         const video = await loadVideoElement(local);
         if (cancelled) return;
@@ -216,7 +243,7 @@ export function FlowMeasure({
           ctx2d.getImageData(0, 0, 1, 1);
         } catch {
           throw new Error(
-            "この動画はブラウザの制限で解析できませんでした。院内ネットワークの設定により動画の読み取りが制限されている可能性があります。",
+            "動画の解析に失敗しました。もう一度開くか、動画を取り込み直してください。",
           );
         }
         setFrameReady(true);
@@ -228,13 +255,17 @@ export function FlowMeasure({
     })();
     return () => {
       cancelled = true;
-      // Blob URL に変換していた場合は解放する（元のURLの場合は startsWith で判定）。
-      if (localUrlRef.current?.startsWith("blob:")) {
+      // Blob URL に変換していた場合は解放する（ドラフトの blob: URL そのものは
+      // 呼び出し側のものなので解放しない）。
+      if (
+        localUrlRef.current?.startsWith("blob:") &&
+        localUrlRef.current !== videoUrl
+      ) {
         URL.revokeObjectURL(localUrlRef.current);
       }
       localUrlRef.current = null;
     };
-  }, [videoUrl]);
+  }, [videoUrl, videoStoragePath]);
 
   // 線が変わるたびに代表フレームへ線を描き直す。
   useEffect(() => {
@@ -420,7 +451,7 @@ export function FlowMeasure({
       }
     } catch {
       setError(
-        "解析中に動画の画素を読み取れませんでした。ブラウザの制限の可能性があります。",
+        "動画の解析に失敗しました。もう一度開くか、動画を取り込み直してください。",
       );
       setPhase("frame");
       return;

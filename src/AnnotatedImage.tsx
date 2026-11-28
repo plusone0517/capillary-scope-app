@@ -1,10 +1,12 @@
-// 注釈つき画像：元の画像の上に番号つきの丸マーカーを重ね、下に
-// 「番号 → 見出し＋コメント」の一覧を出す共通コンポーネント。
+// 注釈つき画像：元の画像の上に「対象部分を囲む輪＋番号バッジ＋短い
+// ラベル」のマーカーを重ね、下に「番号 → 見出し＋コメント」の一覧を
+// 出す共通コンポーネント。
 //
-// 解析結果を「抽出のベタ塗り」ではなく、元の画像のどこを見ているのかが
-// 分かる形で示すために使う（AI候補の提示、自動計測の根拠表示）。
-// マーカーを押すと対応する一覧項目へスクロールして強調され、一覧項目に
-// 触れる／フォーカスすると対応するマーカーが強調される。
+// 解析結果を「抽出のベタ塗り」や「点だけのマーカー」ではなく、元の画像の
+// どの部分を見ているのかが分かる形で示すために使う（AI候補の提示、
+// 自動計測の根拠表示）。マーカーを押すと対応する一覧項目へスクロール
+// して強調され、一覧項目に触れる／フォーカスすると対応するマーカーが
+// 強調される。
 
 import { useRef, useState } from "react";
 
@@ -20,6 +22,12 @@ export type AnnotationItem = {
   y: number | null;
   /** 臨床フラグ系の項目は赤マーカーにする。 */
   clinical?: boolean;
+  /**
+   * マーカーの輪の近くに出す短いラベル（例：「蛇行」）。
+   * 画像上のマーカーだけでも何を指しているか分かるようにするためのもの。
+   * 省略した項目は番号バッジだけのマーカーになる。
+   */
+  shortLabel?: string;
   /** 一覧の見出し（例：「No.7 蛇行型（AI候補・確からしさ：中）」）。 */
   heading: string;
   /** 一覧のコメント本文（AIの理由など）。 */
@@ -72,6 +80,12 @@ export function AnnotatedImage({ imageUrl, imageAlt, items, listLabel }: Props) 
         {items.map((item, i) => {
           if (item.x == null || item.y == null) return null;
           const active = activeId === item.id;
+          // ラベルが画像の右端からはみ出さないよう、右寄りのマーカーでは
+          // バッジとラベルを輪の左側に出す。
+          const flip = item.x > 65;
+          const ringColor = item.clinical
+            ? "border-[var(--alert)]"
+            : "border-[var(--accent)]";
           return (
             <button
               key={item.id}
@@ -82,12 +96,38 @@ export function AnnotatedImage({ imageUrl, imageAlt, items, listLabel }: Props) 
               onMouseLeave={() => setActiveId(null)}
               onFocus={() => setActiveId(item.id)}
               onBlur={() => setActiveId(null)}
-              style={{ left: `${item.x}%`, top: `${item.y}%` }}
-              className={`absolute z-10 flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white text-base font-bold text-white shadow-[0_2px_8px_rgba(13,59,76,0.45)] transition-transform ${markerColorClass(item.clinical)} ${
-                active ? "z-20 scale-125 ring-4 ring-white/70" : ""
+              style={{ left: `${item.x}%`, top: `${item.y}%`, width: "10%" }}
+              className={`absolute z-10 aspect-square -translate-x-1/2 -translate-y-1/2 transition-transform ${
+                active ? "z-20 scale-110" : ""
               }`}
             >
-              {i + 1}
+              {/* 対象部分を囲む輪 */}
+              <span
+                aria-hidden="true"
+                className={`block h-full w-full rounded-full border-[3px] bg-white/10 shadow-[0_2px_10px_rgba(13,59,76,0.45)] ${ringColor} ${
+                  active ? "ring-4 ring-white/80" : ""
+                }`}
+              />
+              {/* 番号バッジ（輪の右上／左上） */}
+              <span
+                aria-hidden="true"
+                className={`absolute -top-2 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white text-sm font-bold text-white shadow-[0_2px_8px_rgba(13,59,76,0.45)] ${markerColorClass(item.clinical)} ${
+                  flip ? "-left-2" : "-right-2"
+                }`}
+              >
+                {i + 1}
+              </span>
+              {/* 短いラベル（バッジの横） */}
+              {item.shortLabel && (
+                <span
+                  aria-hidden="true"
+                  className={`absolute -top-2 whitespace-nowrap rounded-full px-2 py-0.5 text-sm font-bold text-white shadow-[0_2px_8px_rgba(13,59,76,0.45)] ${markerColorClass(item.clinical)} ${
+                    flip ? "right-full mr-1" : "left-full ml-1"
+                  }`}
+                >
+                  {item.shortLabel}
+                </span>
+              )}
             </button>
           );
         })}

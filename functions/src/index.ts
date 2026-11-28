@@ -451,3 +451,267 @@ export const analyzeImagePatterns = onCall<
     return { configured: true, candidates };
   },
 );
+
+/* ================= AIによるレポート文の下書き（試作） ================= */
+
+/** 下書き文の最大文字数（応答が長くなりすぎた場合の切り捨て）。 */
+const MAX_DRAFT_LENGTH = 1200;
+/** パターンの説明文1項目あたりの最大文字数（入力検証用）。 */
+const MAX_PATTERN_TEXT_LENGTH = 500;
+/** 短いラベル類（指・印象・フラグ名）の最大文字数（入力検証用）。 */
+const MAX_LABEL_LENGTH = 50;
+
+interface DraftReportPatternInput {
+  code: string;
+  name: string;
+  /** 形の特徴。 */
+  feature: string;
+  /** 原因。 */
+  why: string;
+  /** 重なりやすい症状。 */
+  symptoms: string;
+  /** 未病の見方。 */
+  mibyo: string;
+}
+
+interface DraftReportRequest {
+  /** 観察した指の表示名（例：「左手・薬指」）。 */
+  fingerLabel?: string;
+  /** 密度（本/mm）。測っていない場合は null。 */
+  densityPerMm?: number | null;
+  /** 流れの印象の表示名。未選択は null。 */
+  flowLabel?: string | null;
+  /** 色の印象の表示名。未選択は null。 */
+  colorLabel?: string | null;
+  /** 選択されたパターン（コード＋名前＋4部構成の説明）。 */
+  patterns?: DraftReportPatternInput[];
+  /** 臨床フラグの表示名の一覧。 */
+  clinicalFlags?: string[];
+  /** 前回との変化の表示名。初回などは null。 */
+  changeVsPrevLabel?: string | null;
+}
+
+interface DraftReportResult {
+  /** APIキーが設定済みかどうか。false のとき summary / advice は空。 */
+  configured: boolean;
+  /** 所見のまとめの下書き。 */
+  summary: string;
+  /** アドバイスの下書き。 */
+  advice: string;
+}
+
+/** 文字列入力を検証して切り詰める。文字列でなければ空文字。 */
+function shortText(raw: unknown, max: number): string {
+  return typeof raw === "string" ? raw.slice(0, max) : "";
+}
+
+/** null 許容のラベル入力。空文字は null にそろえる。 */
+function labelOrNull(raw: unknown): string | null {
+  const t = shortText(raw, MAX_LABEL_LENGTH).trim();
+  return t ? t : null;
+}
+
+function buildDraftPrompt(input: {
+  fingerLabel: string;
+  densityPerMm: number | null;
+  flowLabel: string | null;
+  colorLabel: string | null;
+  patterns: DraftReportPatternInput[];
+  clinicalFlags: string[];
+  changeVsPrevLabel: string | null;
+}): string {
+  const lines: string[] = [];
+  lines.push("次は、爪郭毛細血管の観察で記録された所見です。");
+  lines.push(`観察した指：${input.fingerLabel || "記録なし"}`);
+  lines.push(
+    input.densityPerMm != null
+      ? `密度：1mmあたり${input.densityPerMm}本`
+      : "密度：記録なし",
+  );
+  lines.push(`流れの印象：${input.flowLabel ?? "記録なし"}`);
+  lines.push(`色の印象：${input.colorLabel ?? "記録なし"}`);
+  if (input.patterns.length > 0) {
+    lines.push("選択された形（パターン）とその説明：");
+    for (const p of input.patterns) {
+      lines.push(`- ${p.name}`);
+      lines.push(`  特徴：${p.feature}`);
+      lines.push(`  原因：${p.why}`);
+      lines.push(`  重なりやすい症状：${p.symptoms}`);
+      lines.push(`  未病の見方：${p.mibyo}`);
+    }
+  } else {
+    lines.push("選択された形（パターン）：なし");
+  }
+  lines.push(
+    input.clinicalFlags.length > 0
+      ? `臨床フラグ：${input.clinicalFlags.join("、")}`
+      : "臨床フラグ：なし",
+  );
+  lines.push(`前回との変化：${input.changeVsPrevLabel ?? "記録なし"}`);
+  lines.push("");
+  lines.push(
+    "この所見をもとに、レポートに載せる「所見のまとめ」と「アドバイス」の下書きを作ってください。",
+  );
+  lines.push(
+    "summary には、今回の観察で確認した内容（指、密度、流れと色の印象、見られた形とその読み方、前回との変化）を書いてください。",
+  );
+  lines.push(
+    "advice には、この所見をふまえて日常生活で取り組める具体的な内容（食事、運動、睡眠、冷えへの備えなど、所見と結びつくもの）を書いてください。",
+  );
+  if (input.clinicalFlags.length > 0) {
+    lines.push(
+      "臨床フラグがあるため、summary か advice の中に、医療機関への受診を促す一文を必ず入れてください。",
+    );
+  }
+  lines.push(
+    '出力は次の形式の JSON のみとしてください: {"summary": "所見のまとめ", "advice": "アドバイス"}',
+  );
+  return lines.join("\n");
+}
+
+/**
+ * AIによるレポート文の下書き（試作）。
+ * - スタッフ認証が必須（requireActiveStaff）。
+ * - 入力は所見の内容だけ。氏名・ID 等の情報は含めない。
+ * - AI は下書きを作るだけ。スタッフが画面で確認・手直しして保存する
+ *   前提で、ここでは何も保存しない。
+ * - APIキー未設定のときはエラーを投げず { configured: false } を返す。
+ */
+export const draftReportText = onCall<
+  DraftReportRequest,
+  Promise<DraftReportResult>
+>(
+  { region: REGION, secrets: [openAiApiKey], timeoutSeconds: 120 },
+  async (request) => {
+    await requireActiveStaff(request.auth?.uid);
+
+    const data = request.data ?? {};
+    const fingerLabel = shortText(data.fingerLabel, MAX_LABEL_LENGTH);
+    const densityPerMm =
+      typeof data.densityPerMm === "number" &&
+      Number.isFinite(data.densityPerMm) &&
+      data.densityPerMm >= 0 &&
+      data.densityPerMm <= 100
+        ? data.densityPerMm
+        : null;
+    const flowLabel = labelOrNull(data.flowLabel);
+    const colorLabel = labelOrNull(data.colorLabel);
+    const changeVsPrevLabel = labelOrNull(data.changeVsPrevLabel);
+
+    // パターンは28種の正規コードと照合し、不正なものは捨てる。
+    const patterns: DraftReportPatternInput[] = [];
+    if (Array.isArray(data.patterns)) {
+      for (const raw of data.patterns) {
+        if (patterns.length >= PATTERN_SUMMARIES.length) break;
+        if (typeof raw !== "object" || raw === null) continue;
+        const p = raw as unknown as Record<string, unknown>;
+        if (typeof p.code !== "string" || !PATTERN_CODE_SET.has(p.code)) {
+          continue;
+        }
+        if (patterns.some((x) => x.code === p.code)) continue;
+        patterns.push({
+          code: p.code,
+          name: shortText(p.name, MAX_LABEL_LENGTH),
+          feature: shortText(p.feature, MAX_PATTERN_TEXT_LENGTH),
+          why: shortText(p.why, MAX_PATTERN_TEXT_LENGTH),
+          symptoms: shortText(p.symptoms, MAX_PATTERN_TEXT_LENGTH),
+          mibyo: shortText(p.mibyo, MAX_PATTERN_TEXT_LENGTH),
+        });
+      }
+    }
+    const clinicalFlags: string[] = [];
+    if (Array.isArray(data.clinicalFlags)) {
+      for (const raw of data.clinicalFlags) {
+        if (clinicalFlags.length >= 8) break;
+        const t = labelOrNull(raw);
+        if (t) clinicalFlags.push(t);
+      }
+    }
+
+    let apiKey = "";
+    try {
+      apiKey = openAiApiKey.value();
+    } catch {
+      apiKey = "";
+    }
+    if (!apiKey) {
+      return { configured: false, summary: "", advice: "" };
+    }
+
+    const model = process.env.OPENAI_TEXT_MODEL || "gpt-4o";
+
+    let response: Response;
+    try {
+      response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0.4,
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "system",
+              content: [
+                "あなたは自由診療クリニックの毛細血管観察レポートの下書きを作るアシスタントです。",
+                "文体は、一般の人に向けた平易な日本語で、クリニックの案内のような信頼感のある落ち着いた言い回しにしてください。",
+                "summary も advice も、箇条書きではなく、流れる文章で書いてください。見出しや記号での区切りは入れないでください。",
+                "独自の比喩や凝った言い回しは使わないでください。",
+                "否定的な言い方や、注意書き・免責のような注記は書かないでください。",
+                "これは観察の記録と生活アドバイスです。診断や病名の断定、治療や製品の効能の断定はしないでください。入力にない数値や事実を作らないでください。",
+              ].join("\n"),
+            },
+            {
+              role: "user",
+              content: buildDraftPrompt({
+                fingerLabel,
+                densityPerMm,
+                flowLabel,
+                colorLabel,
+                patterns,
+                clinicalFlags,
+                changeVsPrevLabel,
+              }),
+            },
+          ],
+        }),
+      });
+    } catch {
+      throw new HttpsError(
+        "internal",
+        "下書きの作成に失敗しました。時間をおいてもう一度お試しください。",
+      );
+    }
+    if (!response.ok) {
+      throw new HttpsError(
+        "internal",
+        "下書きの作成に失敗しました。時間をおいてもう一度お試しください。",
+      );
+    }
+
+    const resData = (await response.json()) as {
+      choices?: { message?: { content?: string } }[];
+    };
+    const content = resData.choices?.[0]?.message?.content;
+    if (typeof content !== "string") {
+      throw new HttpsError("internal", "AIの応答を読み取れませんでした。");
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      throw new HttpsError("internal", "AIの応答を読み取れませんでした。");
+    }
+    const obj = parsed as { summary?: unknown; advice?: unknown };
+    const summary = shortText(obj.summary, MAX_DRAFT_LENGTH).trim();
+    const advice = shortText(obj.advice, MAX_DRAFT_LENGTH).trim();
+    if (!summary && !advice) {
+      throw new HttpsError("internal", "AIの応答を読み取れませんでした。");
+    }
+
+    return { configured: true, summary, advice };
+  },
+);

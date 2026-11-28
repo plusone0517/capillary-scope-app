@@ -135,9 +135,17 @@ export function ReportBody({
       shapeParts.push(`新たに見られた形：${prevPd.added.join("、")}`);
     if (prevPd.removed.length > 0)
       shapeParts.push(`前回のみ見られた形：${prevPd.removed.join("、")}`);
+    // 両回ともパターン未選択なら「同じ形」ではなく「記録なし」とする
+    // （一致した形の欄の「選択されたパターンはありません」と矛盾させない）。
+    const bothNoPatterns = prev.patterns.length === 0 && obs.patterns.length === 0;
     compareRows.push({
       label: "形の変化",
-      value: shapeParts.length > 0 ? shapeParts.join("／") : "前回と同じ形でした",
+      value:
+        shapeParts.length > 0
+          ? shapeParts.join("／")
+          : bothNoPatterns
+            ? "形の記録がありません"
+            : "前回と同じ形でした",
     });
     compareRows.push({
       label: "臨床フラグ",

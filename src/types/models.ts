@@ -132,6 +132,12 @@ export interface Observation {
   changeVsPrevious: string | null;
   /** 伝えたアドバイスのメモ。 */
   adviceNote: string;
+  /**
+   * スタッフが手直しした「所見のまとめ」。AIの下書きを直した場合もここに入る。
+   * 未保存・空文字の観察では、レポート表示時に所見から自動で組み立てる。
+   * 旧データには存在しないため任意項目。
+   */
+  summaryNote?: string;
   /** 受診案内を実施したか（臨床フラグがある場合に記録）。 */
   referralGiven: boolean;
   images: MediaRef[];
