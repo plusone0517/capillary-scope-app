@@ -29,6 +29,66 @@ type CapturedVideo,
 const MAX_IMAGES = 5;
 const MAX_RECORD_SEC = 20;
 
+/** 手動で選んだカメラを次回も使うため、deviceId を保存するキー。 */
+const CAMERA_STORAGE_KEY = "capillary-scope-camera-device-id";
+
+function readSavedDeviceId(): string {
+  try {
+    return localStorage.getItem(CAMERA_STORAGE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function saveDeviceId(id: string): void {
+  try {
+    if (id) localStorage.setItem(CAMERA_STORAGE_KEY, id);
+    else localStorage.removeItem(CAMERA_STORAGE_KEY);
+  } catch {
+    // 保存できなくても撮影は続けられるため、そのまま進める。
+  }
+}
+
+/**
+ * 列挙したカメラから、スコープらしいものを優先して1台選ぶ。
+ * 優先順位：ラベルに「Anyty」（3R Solution のカメラブランド）を含むもの →
+ * USB等の外部カメラらしいもの → 先頭。
+ * 内蔵カメラがあるPCでもスコープを掴むための自動選択。
+ */
+function pickPreferredCamera(
+  cams: MediaDeviceInfo[],
+): MediaDeviceInfo | undefined {
+  if (cams.length === 0) return undefined;
+  const byLabel = (re: RegExp) => cams.find((c) => re.test(c.label ?? ""));
+  return (
+    byLabel(/anyty/i) ??
+    byLabel(/usb|uvc|scope/i) ??
+    cams.find(
+      (c) => !/integrated|internal|built-?in|内蔵|facetime/i.test(c.label ?? ""),
+    ) ??
+    cams[0]
+  );
+}
+
+/** getUserMedia の失敗理由を、利用者向けの平易な文に分ける。 */
+function describeCameraError(err: unknown): string {
+  const name = err instanceof DOMException ? err.name : "";
+  switch (name) {
+    case "NotAllowedError":
+    case "SecurityError":
+      return "カメラの許可が必要です。ブラウザのアドレスバー横の設定で、このサイトへのカメラ許可をオンにしてから、もう一度「カメラを開始」を押してください。";
+    case "NotReadableError":
+    case "AbortError":
+      return "カメラが他のソフトで使用中です。そのソフトを閉じてから「カメラを再検出」を押してください。";
+    case "NotFoundError":
+    case "DevicesNotFoundError":
+    case "OverconstrainedError":
+      return "カメラが見つかりません。スコープのUSB接続を確認してから「カメラを再検出」を押してください。";
+    default:
+      return `カメラを起動できませんでした${name ? `（${name}）` : ""}。スコープの接続と、ブラウザのカメラ許可を確認してください。`;
+  }
+}
+
 type Props = {
   images: CapturedImage[];
   primaryIndex: number;
@@ -58,7 +118,9 @@ export function useCapturePanel({
   const [recorderOk] = useState(detectRecorderSupport);
   const [ipad] = useState(isIPad);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
-  const [deviceId, setDeviceId] = useState<string>("");
+  // 前回手動で選んだカメラがあれば、最初からその deviceId を選択状態にする。
+  const [deviceId, setDeviceId] = useState<string>(() => readSavedDeviceId());
+  const [activeLabel, setActiveLabel] = useState("");
   const [cameraOn, setCameraOn] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -73,6 +135,7 @@ export function useCapturePanel({
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
+    setActiveLabel("");
     setCameraOn(false);
   }, []);
 
@@ -153,53 +216,105 @@ export function useCapturePanel({
     onVideoChange(null);
   };
 
-  const startStream = useCallback(
-    async (targetDeviceId: string) => {
-      setCameraError(null);
-      try {
-        const constraints: MediaStreamConstraints = {
-          video: targetDeviceId
-            ? { deviceId: { exact: targetDeviceId } }
-            : { width: { ideal: 1920 }, height: { ideal: 1080 } },
-          audio: false,
-        };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        streamRef.current?.getTracks().forEach((track) => track.stop());
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play().catch(() => undefined);
+  const startStream = useCallback(async (targetDeviceId: string) => {
+    setCameraError(null);
+    // 解像度は ideal のみで要求する（exact で要求すると、対応外のカメラで
+    // OverconstrainedError になり起動できないため）。
+    const openStream = (video: MediaTrackConstraints) =>
+      navigator.mediaDevices.getUserMedia({ video, audio: false });
+    try {
+      let stream: MediaStream;
+      if (targetDeviceId) {
+        try {
+          stream = await openStream({ deviceId: { exact: targetDeviceId } });
+        } catch {
+          // 指定したカメラで開けない場合は、条件を落として取り直す。
+          stream = await openStream({
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          });
         }
-        setCameraOn(true);
-        // 許可が取れたあとに一覧を読み直すと、カメラ名（ラベル）が出る。
-        const all = await navigator.mediaDevices.enumerateDevices();
-        const cams = all.filter((d) => d.kind === "videoinput");
-        setDevices(cams);
-        const active = stream.getVideoTracks()[0]?.getSettings().deviceId;
-        if (active) setDeviceId(active);
-      } catch {
-        setCameraError(
-          "カメラを起動できませんでした。スコープが接続されているか、ブラウザのカメラ許可がオンになっているか確認してください。",
-        );
-        setCameraOn(false);
+      } else {
+        stream = await openStream({
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        });
       }
-    },
-    [],
-  );
+      // 許可が取れたあとに一覧を読み直すと、カメラ名（ラベル）が出る。
+      const all = await navigator.mediaDevices
+        .enumerateDevices()
+        .catch(() => [] as MediaDeviceInfo[]);
+      const cams = all.filter((d) => d.kind === "videoinput");
+      setDevices(cams);
+      // 対象の指定がない、または指定したカメラがもう無い場合は、
+      // 保存済みの選択 → スコープらしいカメラの順で自動選択する。
+      const targetExists =
+        targetDeviceId !== "" &&
+        cams.some((c) => c.deviceId === targetDeviceId);
+      if (!targetExists) {
+        const activeId = stream.getVideoTracks()[0]?.getSettings().deviceId;
+        const savedId = readSavedDeviceId();
+        const chosen =
+          (savedId
+            ? cams.find((c) => c.deviceId === savedId)?.deviceId
+            : undefined) ?? pickPreferredCamera(cams)?.deviceId;
+        if (chosen && chosen !== activeId) {
+          try {
+            const scoped = await openStream({
+              deviceId: { exact: chosen },
+            });
+            stream.getTracks().forEach((track) => track.stop());
+            stream = scoped;
+          } catch {
+            // 優先カメラで開けなければ、開いている映像のまま続ける。
+          }
+        }
+      }
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play().catch(() => undefined);
+      }
+      setCameraOn(true);
+      const track = stream.getVideoTracks()[0];
+      const activeId = track?.getSettings().deviceId;
+      if (activeId) setDeviceId(activeId);
+      setActiveLabel(track?.label ?? "");
+    } catch (err) {
+      setCameraError(describeCameraError(err));
+      setCameraOn(false);
+    }
+  }, []);
+
+  /** USBの挿し直しなどに、ページ再読み込みなしで列挙と接続をやり直す。 */
+  const redetectCamera = useCallback(async () => {
+    stopStream();
+    await startStream("");
+  }, [startStream, stopStream]);
 
   // 初回マウント時にデバイス一覧（許可前は名前なし）を取得する。
+  // USBの抜き挿し（devicechange）でも一覧を読み直す。
   useEffect(() => {
     if (support.kind !== "ok") return;
     let cancelled = false;
-    navigator.mediaDevices
-      .enumerateDevices()
-      .then((all) => {
-        if (cancelled) return;
-        setDevices(all.filter((d) => d.kind === "videoinput"));
-      })
-      .catch(() => undefined);
+    const refreshDevices = () => {
+      navigator.mediaDevices
+        .enumerateDevices()
+        .then((all) => {
+          if (cancelled) return;
+          setDevices(all.filter((d) => d.kind === "videoinput"));
+        })
+        .catch(() => undefined);
+    };
+    refreshDevices();
+    navigator.mediaDevices.addEventListener?.("devicechange", refreshDevices);
     return () => {
       cancelled = true;
+      navigator.mediaDevices.removeEventListener?.(
+        "devicechange",
+        refreshDevices,
+      );
       if (recordTimerRef.current != null) {
         window.clearInterval(recordTimerRef.current);
         recordTimerRef.current = null;
@@ -271,6 +386,7 @@ export function useCapturePanel({
     devices,
     deviceId,
     setDeviceId,
+    activeLabel,
     cameraOn,
     cameraError,
     busy,
@@ -278,6 +394,7 @@ export function useCapturePanel({
     recordElapsed,
     // 操作
     startStream,
+    redetectCamera,
     stopStream,
     startRecording,
     stopRecording,
@@ -477,12 +594,14 @@ export function CaptureControls({
     devices,
     deviceId,
     setDeviceId,
+    activeLabel,
     cameraOn,
     cameraError,
     busy,
     recording,
     recordElapsed,
     startStream,
+    redetectCamera,
     stopStream,
     startRecording,
     stopRecording,
@@ -505,10 +624,13 @@ export function CaptureControls({
                 value={deviceId}
                 onChange={(e) => {
                   setDeviceId(e.target.value);
+                  // 手動で選んだカメラは次回も使うため保存する
+                  // （「自動」を選んだら保存を消す）。
+                  saveDeviceId(e.target.value);
                   if (cameraOn) void startStream(e.target.value);
                 }}
               >
-                <option value="">自動（既定のカメラ）</option>
+                <option value="">自動（スコープを優先して選択）</option>
                 {devices.map((d, i) => (
                   <option key={d.deviceId || `cam-${i}`} value={d.deviceId}>
                     {d.label || `カメラ ${i + 1}（名前はカメラ開始後に表示されます）`}
@@ -532,6 +654,29 @@ export function CaptureControls({
               >
                 カメラを開始
               </button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            {cameraOn && (
+              <p className="text-base text-[var(--text)]" aria-live="polite">
+                使用中のカメラ：
+                <span className="font-bold">
+                  {activeLabel || "名前を取得できませんでした"}
+                </span>
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={() => void redetectCamera()}
+              className="min-h-11 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-4 text-base font-medium text-[var(--text)]"
+            >
+              カメラを再検出
+            </button>
+            {!cameraOn && devices.length === 0 && (
+              <p className="text-base font-medium text-[var(--alert)]">
+                カメラが見つかりません。スコープのUSB接続を確認してから「カメラを再検出」を押してください。
+              </p>
             )}
           </div>
 
