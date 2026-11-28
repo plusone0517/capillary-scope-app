@@ -38,6 +38,7 @@ type CapturedImage,
 type CapturedVideo,
 type SharpnessMeter,
 } from "./camera";
+import { ImageQualityHint } from "./ImageQualityHint";
 
 const MAX_IMAGES = 5;
 const MAX_RECORD_SEC = 20;
@@ -1257,6 +1258,11 @@ export function CaptureMediaDisplay({
               </li>
             ))}
           </ul>
+          {/* 代表画像が読み取りにくいときだけ、撮り直しの案内を出す。 */}
+          <ImageQualityHint
+            imageUrl={(images[primaryIndex] ?? images[0])?.previewUrl ?? null}
+            className="mt-2"
+          />
         </div>
       )}
       {video && (

@@ -34,6 +34,20 @@ export type DensityMeasurement = {
   count: number;
   /** 密度（本/mm、小数1桁）。 */
   densityPerMm: number;
+  /**
+   * 自動で出した先端の候補（遠位列として見つけたもの全部。0〜1 の比）。
+   * points は人が確かめた結果、こちらは自動の提案そのもの。
+   * 2つを比べれば自動の精度を測れるので、捨てないこと。自動の提案を使わなかった記録には無い。
+   */
+  proposal?: { version: string; points: Point[] };
+  /** 数えた画像の画質の目安（しきい値を見直すための記録）。読めなかった画像には無い。 */
+  imageQuality?: {
+    version: string;
+    sharpness: number;
+    vesselContrast: number;
+    brightness: number;
+    glarePct: number;
+  };
 };
 
 export type CalibrationSource = "auto_scale" | "manual" | "saved";
@@ -87,6 +101,58 @@ export function defaultLine(
   return { start: { x: cx - len / 2, y }, end: { x: cx + len / 2, y } };
 }
 
+/**
+ * 先端の列（y = slope × x + intercept）に沿って、数える範囲の線を置く。
+ * 置き方は毎回同じにする：画像の左右の中央に、列の傾きに合わせて、長さ targetMm。
+ * 線は先端より少し上（爪の側）に offsetPx だけずらし、先端が線に隠れないようにする。
+ * どこを数えるかを人や自動の都合で選ばない（本数の多いところを選ぶと密度が高く出るため）。
+ */
+export function lineAlongRow(
+  row: { slope: number; intercept: number },
+  imageWidthPx: number,
+  imageHeightPx: number,
+  umPerPx: number,
+  offsetPx: number,
+  targetMm = 1,
+): { start: Point; end: Point } {
+  const norm = Math.hypot(1, row.slope);
+  const ux = 1 / norm;
+  const uy = row.slope / norm;
+  // 横幅の 9 割に収まる長さまで。
+  const len = Math.min(mmToPx(targetMm, umPerPx), (imageWidthPx * 0.9) / ux);
+  const cx = imageWidthPx / 2;
+  const cy = row.slope * cx + row.intercept - offsetPx;
+  const line = {
+    start: { x: cx - (ux * len) / 2, y: cy - (uy * len) / 2 },
+    end: { x: cx + (ux * len) / 2, y: cy + (uy * len) / 2 },
+  };
+  // 上下にはみ出したら、画像の中に戻す。
+  const minY = Math.min(line.start.y, line.end.y);
+  const maxY = Math.max(line.start.y, line.end.y);
+  const shift = minY < 0 ? -minY : maxY > imageHeightPx ? imageHeightPx - maxY : 0;
+  return {
+    start: { x: line.start.x, y: line.start.y + shift },
+    end: { x: line.end.x, y: line.end.y + shift },
+  };
+}
+
+/**
+ * 点を線に垂直に下ろした位置（線の始点が 0、終点が 1）。線の長さが 0 なら null。
+ */
+export function positionAlong(p: Point, line: { start: Point; end: Point }): number | null {
+  const dx = line.end.x - line.start.x;
+  const dy = line.end.y - line.start.y;
+  const len2 = dx * dx + dy * dy;
+  if (!(len2 > 0)) return null;
+  return ((p.x - line.start.x) * dx + (p.y - line.start.y) * dy) / len2;
+}
+
+/** 点が、線の範囲（始点から終点までの幅）の中にあるか。 */
+export function isWithinRange(p: Point, line: { start: Point; end: Point }): boolean {
+  const t = positionAlong(p, line);
+  return t != null && t >= 0 && t <= 1;
+}
+
 /** 線を画像の中に収めたまま平行移動する。 */
 export function moveLine(
   line: { start: Point; end: Point },
@@ -129,6 +195,11 @@ export function buildMeasurement(args: {
   calibrationSource?: CalibrationSource;
   imageWidthPx: number;
   imageHeightPx: number;
+  /** 自動で出した候補（ピクセル）。出していなければ渡さない。 */
+  proposal?: { version: string; points: Point[] } | null;
+  /** 前の記録から引き継ぐ候補（すでに 0〜1 の比）。 */
+  proposalStored?: DensityMeasurement["proposal"] | null;
+  imageQuality?: DensityMeasurement["imageQuality"] | null;
 }): DensityMeasurement | null {
   const { points, line, umPerPx, imageWidthPx: w, imageHeightPx: h } = args;
   const lengthMm = pxToMm(distancePx(line.start, line.end), umPerPx);
@@ -146,6 +217,12 @@ export function buildMeasurement(args: {
     lengthMm: Math.round(lengthMm * 1000) / 1000,
     count: points.length,
     densityPerMm: density,
+    ...(args.proposal
+      ? { proposal: { version: args.proposal.version, points: args.proposal.points.map(rel) } }
+      : args.proposalStored
+        ? { proposal: args.proposalStored }
+        : {}),
+    ...(args.imageQuality ? { imageQuality: args.imageQuality } : {}),
   };
 }
 

@@ -125,8 +125,10 @@ function safeStorage(): Storage | null {
   }
 }
 
-/** 画像（img 要素）から画素を取り出して目盛りを探す。読めない画像（別ドメイン等）は null。 */
-export function detectScaleBarFromImage(img: HTMLImageElement): ScaleBar | null {
+/**
+ * 画像（img 要素）から画素を取り出す。読めない画像（別ドメインから読んだ保存済みの画像など）は null。
+ */
+export function readImagePixels(img: HTMLImageElement): RgbaImage | null {
   try {
     const w = img.naturalWidth;
     const h = img.naturalHeight;
@@ -137,9 +139,15 @@ export function detectScaleBarFromImage(img: HTMLImageElement): ScaleBar | null 
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) return null;
     ctx.drawImage(img, 0, 0);
-    return detectScaleBar(ctx.getImageData(0, 0, w, h));
+    return ctx.getImageData(0, 0, w, h);
   } catch {
     // 保存済みの画像は別ドメインから読むため、画素を取り出せないことがある。
     return null;
   }
+}
+
+/** 画像（img 要素）から画素を取り出して目盛りを探す。読めない画像は null。 */
+export function detectScaleBarFromImage(img: HTMLImageElement): ScaleBar | null {
+  const pixels = readImagePixels(img);
+  return pixels ? detectScaleBar(pixels) : null;
 }
