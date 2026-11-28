@@ -17,6 +17,14 @@ export type DensityMeasurement = {
   line: { start: Point; end: Point };
   /** 目盛り合わせの値（元の画像の1ピクセルあたりの長さ μm）。 */
   umPerPx: number;
+  /**
+   * 目盛り合わせの出どころ。
+   * - auto_scale: その画像に写っている目盛りを自動で読み取った（最も確か）。
+   * - manual: その画像の上で人がなぞって合わせた。
+   * - saved: その画像には目盛りが無く、前に合わせた値を使った（倍率が同じという前提）。
+   * 旧い記録には無い。
+   */
+  calibrationSource?: CalibrationSource;
   /** 計測した画像の元の大きさ（ピクセル）。 */
   imageWidthPx: number;
   imageHeightPx: number;
@@ -27,6 +35,8 @@ export type DensityMeasurement = {
   /** 密度（本/mm、小数1桁）。 */
   densityPerMm: number;
 };
+
+export type CalibrationSource = "auto_scale" | "manual" | "saved";
 
 export function distancePx(a: Point, b: Point): number {
   return Math.hypot(b.x - a.x, b.y - a.y);
@@ -116,6 +126,7 @@ export function buildMeasurement(args: {
   points: Point[];
   line: { start: Point; end: Point };
   umPerPx: number;
+  calibrationSource?: CalibrationSource;
   imageWidthPx: number;
   imageHeightPx: number;
 }): DensityMeasurement | null {
@@ -129,6 +140,7 @@ export function buildMeasurement(args: {
     points: points.map(rel),
     line: { start: rel(line.start), end: rel(line.end) },
     umPerPx,
+    ...(args.calibrationSource ? { calibrationSource: args.calibrationSource } : {}),
     imageWidthPx: w,
     imageHeightPx: h,
     lengthMm: Math.round(lengthMm * 1000) / 1000,

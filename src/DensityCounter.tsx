@@ -14,9 +14,16 @@ import {
   pxToMm,
   saveCalibration,
   umPerPxFromLine,
+  type CalibrationSource,
   type DensityMeasurement,
   type Point,
 } from "./densityCount";
+import {
+  detectScaleBarFromImage,
+  loadScaleLabelMm,
+  saveScaleLabelMm,
+  type ScaleBar,
+} from "./scaleDetect";
 
 type Line = { start: Point; end: Point };
 
@@ -48,6 +55,9 @@ export function DensityCounter({
   const [line, setLine] = useState<Line | null>(null);
   const [points, setPoints] = useState<Point[]>([]);
   const [note, setNote] = useState<string | null>(null);
+  // この画像から自動で読み取った目盛り（写っていなければ null）。
+  const [detected, setDetected] = useState<ScaleBar | null>(null);
+  const [source, setSource] = useState<CalibrationSource>("manual");
   const svgRef = useRef<SVGSVGElement | null>(null);
   // 線の上を押したときは、動かしたのか（ドラッグ）、その場を押しただけか（先端の指定）を
   // 指を離すまで決めない。先端は線のすぐ近くにあるため、押しただけなら点として扱う。
@@ -62,11 +72,16 @@ export function DensityCounter({
     const w = img.naturalWidth;
     const h = img.naturalHeight;
     setNatural({ w, h });
+    // 画像に写っている目盛りを自動で読み取る（写っていなければ null）。
+    const bar = detectScaleBarFromImage(img);
     if (scaleImageUrl) {
+      // 目盛りを撮った別の画像：見つかった線を最初から引いておく。
       setMode("calibrate");
-      setCalibLine(null);
+      setCalibLine(bar ? { start: bar.start, end: bar.end } : null);
+      if (bar) setRealLength(String(loadScaleLabelMm()));
       return;
     }
+    setDetected(bar);
     if (
       !restored.current &&
       initial &&
@@ -75,6 +90,7 @@ export function DensityCounter({
     ) {
       restored.current = true;
       setUmPerPx(initial.umPerPx);
+      setSource(initial.calibrationSource ?? "manual");
       setLine({
         start: { x: initial.line.start.x * w, y: initial.line.start.y * h },
         end: { x: initial.line.end.x * w, y: initial.line.end.y * h },
@@ -84,11 +100,25 @@ export function DensityCounter({
       return;
     }
     restored.current = true;
+    if (bar) {
+      // この画像の目盛りから直接合わせる。倍率や解像度が変わっても合わせ直しは要らない。
+      const labelMm = loadScaleLabelMm();
+      const um = (labelMm * 1000) / bar.lengthPx;
+      setUmPerPx(um);
+      setSource("auto_scale");
+      saveCalibration(w, um);
+      setLine((cur) => cur ?? defaultLine(w, h, um));
+      setMode("count");
+      setNote(`画像の目盛り（${labelMm} mm）を自動で読み取りました。`);
+      return;
+    }
     const saved = loadCalibration(w);
     if (saved) {
       setUmPerPx(saved);
+      setSource("saved");
       setLine((cur) => cur ?? defaultLine(w, h, saved));
       setMode("count");
+      setNote("この画像には目盛りが写っていないため、前に合わせた値を使っています。倍率を変えた場合は「目盛りを合わせ直す」を押してください。");
     } else {
       setUmPerPx(null);
       setMode("calibrate");
@@ -166,6 +196,14 @@ export function DensityCounter({
   const applyCalibration = () => {
     if (!natural || !calibValue) return;
     saveCalibration(natural.w, calibValue);
+    // 自動で見つけた目盛りの線をそのまま使い、長さだけ直した場合は、
+    // 「この機種の目盛りは◯mm」として覚える（次の画像から自動で正しく合う）。
+    const usedDetected =
+      detected != null &&
+      calibLine != null &&
+      Math.abs(distancePx(calibLine.start, calibLine.end) - detected.lengthPx) <=
+        detected.lengthPx * 0.03;
+    if (usedDetected || scaleImageUrl) saveScaleLabelMm(realMm);
     setCalibLine(null);
     if (scaleImageUrl) {
       // 目盛りの画像で合わせた → 観察の画像に戻る（同じ解像度なら、その値が使われる）。
@@ -175,6 +213,8 @@ export function DensityCounter({
       return;
     }
     setUmPerPx(calibValue);
+    setSource(usedDetected ? "auto_scale" : "manual");
+    setNote(null);
     setLine(defaultLine(natural.w, natural.h, calibValue));
     setPoints([]);
     setMode("count");
@@ -189,11 +229,12 @@ export function DensityCounter({
             points,
             line,
             umPerPx,
+            calibrationSource: source,
             imageWidthPx: natural.w,
             imageHeightPx: natural.h,
           })
         : null,
-    [natural, line, umPerPx, points, scaleImageUrl],
+    [natural, line, umPerPx, points, scaleImageUrl, source],
   );
 
   const pickScaleImage = (file: File | undefined) => {
@@ -249,7 +290,9 @@ export function DensityCounter({
                 type="button"
                 className={barButton}
                 onClick={() => {
-                  setCalibLine(null);
+                  // 自動で見つけた目盛りがあれば、その線を最初から引いておく（長さだけ直せる）。
+                  setCalibLine(detected ? { start: detected.start, end: detected.end } : null);
+                  if (detected) setRealLength(String(loadScaleLabelMm()));
                   setMode("calibrate");
                 }}
               >
@@ -369,6 +412,19 @@ export function DensityCounter({
                   <circle cx={calibLine.start.x} cy={calibLine.start.y} r={unit * 2.2} fill="#ffcf3f" />
                   <circle cx={calibLine.end.x} cy={calibLine.end.y} r={unit * 2.2} fill="#ffcf3f" />
                 </g>
+              )}
+              {mode === "count" && detected && source === "auto_scale" && (
+                <line
+                  pointerEvents="none"
+                  x1={detected.start.x}
+                  y1={detected.start.y}
+                  x2={detected.end.x}
+                  y2={detected.end.y}
+                  stroke="#ffcf3f"
+                  strokeOpacity="0.9"
+                  strokeWidth={unit * 1.4}
+                  strokeLinecap="round"
+                />
               )}
               {mode === "count" && line && (
                 <>
