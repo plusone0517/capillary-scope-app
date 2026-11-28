@@ -880,10 +880,15 @@ export function CaptureMediaDisplay({
     previewBoxRef,
     support,
     cameraOn,
+    busy,
+    recorderOk,
     recording,
     recordElapsed,
     removeImage,
     removeVideo,
+    startRecording,
+    stopRecording,
+    handleCapture,
     brightnessMode,
     brightnessPct,
     zoomMode,
@@ -891,6 +896,100 @@ export function CaptureMediaDisplay({
     digitalPan,
     setDigitalPan,
   } = cap;
+
+  // ===== 全画面撮影モード =====
+  // プレビュー枠そのものを全画面にする（映像要素を動かさないので、
+  // 撮影・デジタルズームの計算は通常時とそのまま共用できる）。
+  // 第一手段は Fullscreen API、使えない環境（iPad Safari等）では
+  // position:fixed のオーバーレイ表示にフォールバックする。
+  const [fsActive, setFsActive] = useState(false);
+  /** ネイティブの全画面が効いているか（false の間はオーバーレイ表示）。 */
+  const [fsNative, setFsNative] = useState(false);
+  const nativeFsRef = useRef(false);
+
+  const enterFullscreen = useCallback(() => {
+    setFsActive(true);
+    const box = previewBoxRef.current as
+      | (HTMLDivElement & {
+          webkitRequestFullscreen?: () => void;
+        })
+      | null;
+    if (!box) return;
+    try {
+      if (typeof box.requestFullscreen === "function") {
+        const result = box.requestFullscreen() as unknown;
+        if (result instanceof Promise) {
+          result
+            .then(() => {
+              nativeFsRef.current = true;
+            })
+            .catch(() => {
+              // 拒否された場合はオーバーレイ表示のまま続ける。
+              nativeFsRef.current = false;
+            });
+        } else {
+          nativeFsRef.current = true;
+        }
+      } else if (typeof box.webkitRequestFullscreen === "function") {
+        box.webkitRequestFullscreen();
+        nativeFsRef.current = true;
+      }
+    } catch {
+      nativeFsRef.current = false;
+    }
+  }, [previewBoxRef]);
+
+  const exitFullscreen = useCallback(() => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => {});
+    }
+    nativeFsRef.current = false;
+    setFsNative(false);
+    setFsActive(false);
+  }, []);
+
+  // Escやブラウザ側の操作でネイティブ全画面が終わったら表示状態を同期する。
+  useEffect(() => {
+    const onFsChange = () => {
+      if (document.fullscreenElement) {
+        nativeFsRef.current = true;
+        setFsNative(true);
+        setFsActive(true);
+      } else if (nativeFsRef.current) {
+        nativeFsRef.current = false;
+        setFsNative(false);
+        setFsActive(false);
+      }
+    };
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, []);
+
+  // オーバーレイ表示中は Esc で抜けられるようにし、背後のスクロールを止める。
+  useEffect(() => {
+    if (!fsActive || fsNative) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") exitFullscreen();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [fsActive, fsNative, exitFullscreen]);
+
+  // 画面遷移などでこの部品が消えるときは、ネイティブ全画面を残さない。
+  useEffect(() => {
+    return () => {
+      if (nativeFsRef.current && document.fullscreenElement) {
+        void document.exitFullscreen().catch(() => {});
+      }
+    };
+  }, []);
+
+  const fsOverlay = fsActive && !fsNative;
 
   // デジタルズーム表示用：プレビュー枠と映像の実解像度を測る。
   const [boxSize, setBoxSize] = useState({ width: 0, height: 0 });
@@ -999,7 +1098,7 @@ export function CaptureMediaDisplay({
 
   return (
     <div
-      className={`sticky top-[108px] z-30 -mx-4 flex flex-col gap-2 border-b border-[var(--border)] bg-[var(--bg)] px-4 py-2 shadow-[0_8px_16px_-12px_rgba(0,0,0,0.4)] sm:-mx-6 sm:px-6 lg:static lg:z-auto lg:mx-0 lg:min-h-0 lg:gap-3 lg:border-b-0 lg:bg-transparent lg:px-0 lg:py-0 lg:shadow-none ${className}`}
+      className={`sticky top-[108px] ${fsOverlay ? "z-[100]" : "z-30"} -mx-4 flex flex-col gap-2 border-b border-[var(--border)] bg-[var(--bg)] px-4 py-2 shadow-[0_8px_16px_-12px_rgba(0,0,0,0.4)] sm:-mx-6 sm:px-6 lg:static lg:z-auto lg:mx-0 lg:min-h-0 lg:gap-3 lg:border-b-0 lg:bg-transparent lg:px-0 lg:py-0 lg:shadow-none ${className}`}
     >
       {support.kind === "ok" && (
         <div
@@ -1008,7 +1107,11 @@ export function CaptureMediaDisplay({
           onPointerMove={handlePanMove}
           onPointerUp={handlePanEnd}
           onPointerCancel={handlePanEnd}
-          className={`relative h-44 overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-[var(--video-bg)] sm:h-60 lg:min-h-0 lg:flex-1 ${zoomRect ? "cursor-grab touch-none" : ""}`}
+          className={
+            fsActive
+              ? `fixed inset-0 z-[100] h-full w-full overflow-hidden bg-[var(--video-bg)] ${zoomRect ? "cursor-grab touch-none" : ""}`
+              : `relative h-44 overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-[var(--video-bg)] sm:h-60 lg:min-h-0 lg:flex-1 ${zoomRect ? "cursor-grab touch-none" : ""}`
+          }
         >
           <video
             ref={videoRef}
@@ -1030,6 +1133,86 @@ export function CaptureMediaDisplay({
             >
               ● 録画中 {recordElapsed.toFixed(0)}秒
             </p>
+          )}
+          {cameraOn && !fsActive && (
+            <button
+              type="button"
+              onClick={enterFullscreen}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="absolute right-2 top-2 z-10 min-h-11 rounded-[var(--radius)] bg-black/55 px-4 text-base font-bold text-white backdrop-blur-sm"
+            >
+              全画面で撮影
+            </button>
+          )}
+          {fsActive && (
+            <div
+              onPointerDown={(e) => e.stopPropagation()}
+              className="absolute inset-x-0 bottom-0 z-20 flex items-center gap-2 bg-gradient-to-t from-black/75 via-black/50 to-transparent px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-10 sm:gap-3 sm:px-5"
+            >
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  {images.slice(0, 3).map((img, i) => (
+                    <img
+                      key={img.previewUrl}
+                      src={img.previewUrl}
+                      alt={`撮影済みの画像 ${i + 1}`}
+                      className="h-11 w-14 shrink-0 rounded border border-white/40 object-cover"
+                    />
+                  ))}
+                  {images.length > 3 && (
+                    <span className="text-sm font-bold text-white">
+                      +{images.length - 3}
+                    </span>
+                  )}
+                  {video && (
+                    <span className="flex h-11 w-14 shrink-0 items-center justify-center rounded border border-white/40 bg-black/50 text-xs font-bold text-white">
+                      動画
+                      {video.durationSec != null &&
+                        ` ${video.durationSec.toFixed(0)}秒`}
+                    </span>
+                  )}
+                </div>
+                <p className="truncate text-sm font-medium text-white/90">
+                  画像{images.length}枚
+                  {video ? "・動画1本" : ""}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={
+                  !cameraOn || busy || recording || images.length >= MAX_IMAGES
+                }
+                onClick={() => void handleCapture()}
+                className="min-h-[4.5rem] shrink-0 rounded-full bg-[var(--accent)] px-7 text-xl font-bold text-white shadow-lg disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {images.length >= MAX_IMAGES ? "撮影上限" : "撮影"}
+              </button>
+              {recording ? (
+                <button
+                  type="button"
+                  onClick={stopRecording}
+                  className="min-h-14 shrink-0 rounded-full bg-[var(--alert)] px-5 text-lg font-bold text-white shadow-lg"
+                >
+                  ■ 止める {recordElapsed.toFixed(0)}秒
+                </button>
+              ) : recorderOk && !video ? (
+                <button
+                  type="button"
+                  disabled={!cameraOn || busy}
+                  onClick={startRecording}
+                  className="min-h-14 shrink-0 rounded-full border border-white/50 bg-white/10 px-5 text-lg font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  ● 録画
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={exitFullscreen}
+                className="min-h-14 shrink-0 rounded-full border border-white/50 bg-white/10 px-5 text-lg font-bold text-white"
+              >
+                閉じる
+              </button>
+            </div>
           )}
         </div>
       )}
