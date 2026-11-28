@@ -1,4 +1,4 @@
-name: Deploy to Firebase (Hosting + Rules)
+name: Deploy to Firebase (Hosting)
 
 on:
   push:
@@ -42,5 +42,10 @@ jobs:
           VITE_FIREBASE_APP_ID: 1:775174442635:web:eac4a5010f4a5484414e8e
         run: npm run build
 
-      - name: Deploy Hosting, Firestore rules and Storage rules
-        run: npx firebase-tools deploy --only hosting,firestore,storage --project medipro-capillary-scope --non-interactive
+      # 自動デプロイは Hosting のみ。
+      # Firestore のインデックス操作は、デプロイ用サービスアカウントに権限がなく
+      # 403 で失敗する（2026-11-28 確認）。ルール・インデックスを変えたときは
+      # CLAUDE.md の手順で手動デプロイするか、サービスアカウントに
+      # 「Cloud Datastore インデックス管理者」を付与してから対象を戻すこと。
+      - name: Deploy Hosting
+        run: npx firebase-tools deploy --only hosting --project medipro-capillary-scope --non-interactive
