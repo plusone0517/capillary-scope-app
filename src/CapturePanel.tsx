@@ -12,16 +12,26 @@
 // スクロール）、右＝画像画面（全面）」の分割レイアウトに組み替えられるよう、
 // メディア表示部はレスポンシブに切り替わる（lg未満は従来どおり上部sticky固定）。
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import {
 blobToCapturedVideo,
 captureFromVideo,
+computeZoomRect,
+cropFromZoomRect,
 detectCameraSupport,
 detectRecorderSupport,
 fileToCaptured,
 fileToCapturedVideo,
 isIPad,
 pickRecorderMimeType,
+type CaptureOptions,
 type CapturedImage,
 type CapturedVideo,
 } from "./camera";
@@ -31,6 +41,82 @@ const MAX_RECORD_SEC = 20;
 
 /** 手動で選んだカメラを次回も使うため、deviceId を保存するキー。 */
 const CAMERA_STORAGE_KEY = "capillary-scope-camera-device-id";
+
+/** 選んだ解像度プリセットを次回も使うため保存するキー。 */
+const RESOLUTION_STORAGE_KEY = "capillary-scope-camera-resolution";
+
+/** 選べる解像度のプリセット。「最大」はカメラの上限まで要求する。 */
+const RESOLUTION_PRESETS = [
+  { key: "max", label: "最大（カメラの上限）", width: 3840, height: 2160 },
+  { key: "1920x1080", label: "1920 × 1080", width: 1920, height: 1080 },
+  { key: "1280x720", label: "1280 × 720", width: 1280, height: 720 },
+  { key: "640x480", label: "640 × 480", width: 640, height: 480 },
+] as const;
+
+type ResolutionKey = (typeof RESOLUTION_PRESETS)[number]["key"];
+
+function readSavedResolution(): ResolutionKey {
+  try {
+    const saved = localStorage.getItem(RESOLUTION_STORAGE_KEY);
+    return RESOLUTION_PRESETS.some((p) => p.key === saved)
+      ? (saved as ResolutionKey)
+      : "max";
+  } catch {
+    return "max";
+  }
+}
+
+function saveResolution(key: ResolutionKey): void {
+  try {
+    localStorage.setItem(RESOLUTION_STORAGE_KEY, key);
+  } catch {
+    // 保存できなくても撮影は続けられるため、そのまま進める。
+  }
+}
+
+/**
+ * getCapabilities() のうち、このアプリで使う項目だけを切り出した型。
+ * brightness / zoom はブラウザの型定義に無い環境があるため独自に持つ。
+ */
+type TrackCaps = {
+  width?: { min?: number; max?: number };
+  height?: { min?: number; max?: number };
+  brightness?: { min: number; max: number; step?: number };
+  zoom?: { min: number; max: number; step?: number };
+};
+
+function readTrackCaps(track: MediaStreamTrack): TrackCaps {
+  try {
+    if (typeof track.getCapabilities !== "function") return {};
+    return track.getCapabilities() as TrackCaps;
+  } catch {
+    return {};
+  }
+}
+
+function readTrackSetting(track: MediaStreamTrack, key: string): number | null {
+  try {
+    const settings = track.getSettings() as Record<string, unknown>;
+    const value = settings[key];
+    return typeof value === "number" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** ハードウェア制御（明るさ・ズーム）をトラックへ当てる。失敗しても撮影は続ける。 */
+function applyAdvanced(
+  track: MediaStreamTrack,
+  set: Record<string, number>,
+): void {
+  try {
+    void track
+      .applyConstraints({ advanced: [set] } as MediaTrackConstraints)
+      .catch(() => undefined);
+  } catch {
+    // 未対応の環境では何もしない（ソフトウェア側の表示にフォールバックする）。
+  }
+}
 
 function readSavedDeviceId(): string {
   try {
@@ -126,6 +212,94 @@ export function useCapturePanel({
   const [busy, setBusy] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recordElapsed, setRecordElapsed] = useState(0);
+  // ===== カメラ調整（解像度・明るさ・ズーム）=====
+  /** プレビュー枠の要素。撮影時のデジタルズーム切り出し計算に使う。 */
+  const previewBoxRef = useRef<HTMLDivElement | null>(null);
+  const [resolutionKey, setResolutionKeyState] =
+    useState<ResolutionKey>(readSavedResolution);
+  // startStream（依存なしで固定）から最新のプリセットを読めるよう ref にも持つ。
+  const resolutionKeyRef = useRef(resolutionKey);
+  useEffect(() => {
+    resolutionKeyRef.current = resolutionKey;
+  }, [resolutionKey]);
+  /** 起動中トラックの能力（明るさ・ズームのハードウェア制御の有無など）。 */
+  const [trackCaps, setTrackCaps] = useState<TrackCaps>({});
+  /** 実際に開けた解像度（表示用）。 */
+  const [currentSize, setCurrentSize] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
+  /** ソフトウェア明るさ補正（%）。ハードウェア制御が無い場合に使う。 */
+  const [brightnessPct, setBrightnessPct] = useState(100);
+  /** ハードウェア明るさの現在値（capabilities の単位のまま）。 */
+  const [hwBrightness, setHwBrightness] = useState<number | null>(null);
+  /** ハードウェアズームの現在値（capabilities の単位のまま）。 */
+  const [hwZoom, setHwZoom] = useState<number | null>(null);
+  /** デジタルズーム倍率（1〜3）。ハードウェアズームが無い場合に使う。 */
+  const [digitalZoom, setDigitalZoom] = useState(1);
+  /** デジタルズームの表示位置（-1〜1、中心からのずれ）。 */
+  const [digitalPan, setDigitalPan] = useState({ x: 0, y: 0 });
+
+  const brightnessRange = trackCaps.brightness;
+  const zoomRange = trackCaps.zoom;
+  /** 明るさ：ハードウェア制御が使えるか（使えない場合はソフトウェア補正）。 */
+  const brightnessMode: "hw" | "sw" = brightnessRange ? "hw" : "sw";
+  /** ズーム：ハードウェア制御が使えるか（使えない場合はデジタルズーム）。 */
+  const zoomMode: "hw" | "digital" = zoomRange ? "hw" : "digital";
+
+  /** カメラの能力範囲に収まる解像度プリセットだけを候補にする。 */
+  const resolutionOptions = RESOLUTION_PRESETS.filter((preset) => {
+    if (preset.key === "max") return true;
+    const w = trackCaps.width;
+    const h = trackCaps.height;
+    if (w?.max != null && preset.width > w.max) return false;
+    if (w?.min != null && preset.width < w.min) return false;
+    if (h?.max != null && preset.height > h.max) return false;
+    if (h?.min != null && preset.height < h.min) return false;
+    return true;
+  });
+
+  const setBrightnessValue = useCallback(
+    (value: number) => {
+      const track = streamRef.current?.getVideoTracks()[0];
+      if (brightnessRange && track) {
+        const clamped = Math.min(
+          brightnessRange.max,
+          Math.max(brightnessRange.min, value),
+        );
+        setHwBrightness(clamped);
+        applyAdvanced(track, { brightness: clamped });
+      } else {
+        setBrightnessPct(Math.min(150, Math.max(50, value)));
+      }
+    },
+    [brightnessRange],
+  );
+
+  const setZoomValue = useCallback(
+    (value: number) => {
+      const track = streamRef.current?.getVideoTracks()[0];
+      if (zoomRange && track) {
+        const clamped = Math.min(zoomRange.max, Math.max(zoomRange.min, value));
+        setHwZoom(clamped);
+        applyAdvanced(track, { zoom: clamped });
+      } else {
+        const clamped = Math.min(3, Math.max(1, value));
+        setDigitalZoom(clamped);
+        if (clamped <= 1) setDigitalPan({ x: 0, y: 0 });
+      }
+    },
+    [zoomRange],
+  );
+
+  /** ズームと表示位置を初期状態に戻す（明るさはそのまま）。 */
+  const resetZoomView = useCallback(() => {
+    if (zoomRange) setZoomValue(zoomRange.min);
+    else {
+      setDigitalZoom(1);
+      setDigitalPan({ x: 0, y: 0 });
+    }
+  }, [zoomRange, setZoomValue]);
 
   const stopStream = useCallback(() => {
     if (recorderRef.current && recorderRef.current.state !== "inactive") {
@@ -137,6 +311,10 @@ export function useCapturePanel({
     if (videoRef.current) videoRef.current.srcObject = null;
     setActiveLabel("");
     setCameraOn(false);
+    setTrackCaps({});
+    setCurrentSize(null);
+    setHwBrightness(null);
+    setHwZoom(null);
   }, []);
 
   const stopRecording = useCallback(() => {
@@ -220,25 +398,29 @@ export function useCapturePanel({
     setCameraError(null);
     // 解像度は ideal のみで要求する（exact で要求すると、対応外のカメラで
     // OverconstrainedError になり起動できないため）。
+    const preset =
+      RESOLUTION_PRESETS.find((p) => p.key === resolutionKeyRef.current) ??
+      RESOLUTION_PRESETS[0];
+    const sizeIdeal: MediaTrackConstraints = {
+      width: { ideal: preset.width },
+      height: { ideal: preset.height },
+    };
     const openStream = (video: MediaTrackConstraints) =>
       navigator.mediaDevices.getUserMedia({ video, audio: false });
     try {
       let stream: MediaStream;
       if (targetDeviceId) {
         try {
-          stream = await openStream({ deviceId: { exact: targetDeviceId } });
+          stream = await openStream({
+            deviceId: { exact: targetDeviceId },
+            ...sizeIdeal,
+          });
         } catch {
           // 指定したカメラで開けない場合は、条件を落として取り直す。
-          stream = await openStream({
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
-          });
+          stream = await openStream(sizeIdeal);
         }
       } else {
-        stream = await openStream({
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        });
+        stream = await openStream(sizeIdeal);
       }
       // 許可が取れたあとに一覧を読み直すと、カメラ名（ラベル）が出る。
       const all = await navigator.mediaDevices
@@ -262,6 +444,7 @@ export function useCapturePanel({
           try {
             const scoped = await openStream({
               deviceId: { exact: chosen },
+              ...sizeIdeal,
             });
             stream.getTracks().forEach((track) => track.stop());
             stream = scoped;
@@ -281,6 +464,30 @@ export function useCapturePanel({
       const activeId = track?.getSettings().deviceId;
       if (activeId) setDeviceId(activeId);
       setActiveLabel(track?.label ?? "");
+      if (track) {
+        // 起動できたら能力（明るさ・ズームのハードウェア制御の範囲など）と
+        // 実際の解像度を読み、調整バーの初期値にする。
+        const caps = readTrackCaps(track);
+        setTrackCaps(caps);
+        const settings = track.getSettings();
+        setCurrentSize(
+          settings.width && settings.height
+            ? { width: settings.width, height: settings.height }
+            : null,
+        );
+        if (caps.brightness) {
+          const current = readTrackSetting(track, "brightness");
+          setHwBrightness(
+            current ??
+              Math.round(((caps.brightness.min + caps.brightness.max) / 2) * 100) /
+                100,
+          );
+        }
+        if (caps.zoom) {
+          const current = readTrackSetting(track, "zoom");
+          setHwZoom(current ?? caps.zoom.min);
+        }
+      }
     } catch (err) {
       setCameraError(describeCameraError(err));
       setCameraOn(false);
@@ -292,6 +499,17 @@ export function useCapturePanel({
     stopStream();
     await startStream("");
   }, [startStream, stopStream]);
+
+  /** 解像度プリセットの変更：保存し、カメラ起動中なら新しい解像度で開き直す。 */
+  const changeResolution = useCallback(
+    (key: ResolutionKey) => {
+      setResolutionKeyState(key);
+      resolutionKeyRef.current = key;
+      saveResolution(key);
+      if (cameraOn) void startStream(deviceId);
+    },
+    [cameraOn, deviceId, startStream],
+  );
 
   // 初回マウント時にデバイス一覧（許可前は名前なし）を取得する。
   // USBの抜き挿し（devicechange）でも一覧を読み直す。
@@ -328,7 +546,30 @@ export function useCapturePanel({
     if (!videoEl || images.length >= MAX_IMAGES) return;
     setBusy(true);
     try {
-      const captured = await captureFromVideo(videoEl);
+      // プレビューの見た目（ソフトウェア明るさ補正・デジタルズームの
+      // 切り取り範囲）を撮影画像にもそのまま反映する。
+      const options: CaptureOptions = {};
+      if (brightnessMode === "sw" && brightnessPct !== 100) {
+        options.brightnessPct = brightnessPct;
+      }
+      if (zoomMode === "digital" && digitalZoom > 1 && videoEl.videoWidth) {
+        const vw = videoEl.videoWidth;
+        const vh = videoEl.videoHeight;
+        const box = previewBoxRef.current;
+        const containerW = box?.clientWidth || vw;
+        const containerH = box?.clientHeight || vh;
+        const rect = computeZoomRect(
+          containerW,
+          containerH,
+          vw,
+          vh,
+          digitalZoom,
+          digitalPan.x,
+          digitalPan.y,
+        );
+        options.sourceRect = cropFromZoomRect(rect, containerW, containerH, vw, vh);
+      }
+      const captured = await captureFromVideo(videoEl, options);
       const next = [...images, captured];
       onChange(next, images.length === 0 ? 0 : primaryIndex);
     } catch (e) {
@@ -378,8 +619,27 @@ export function useCapturePanel({
     video,
     // 内部の状態と参照
     videoRef,
+    previewBoxRef,
     fileInputRef,
     videoFileInputRef,
+    // カメラ調整（解像度・明るさ・ズーム）
+    resolutionKey,
+    resolutionOptions,
+    changeResolution,
+    currentSize,
+    brightnessMode,
+    brightnessRange,
+    brightnessPct,
+    hwBrightness,
+    setBrightnessValue,
+    zoomMode,
+    zoomRange,
+    hwZoom,
+    digitalZoom,
+    setZoomValue,
+    digitalPan,
+    setDigitalPan,
+    resetZoomView,
     support,
     recorderOk,
     ipad,
@@ -463,13 +723,123 @@ export function CaptureMediaDisplay({
     onChange,
     video,
     videoRef,
+    previewBoxRef,
     support,
     cameraOn,
     recording,
     recordElapsed,
     removeImage,
     removeVideo,
+    brightnessMode,
+    brightnessPct,
+    zoomMode,
+    digitalZoom,
+    digitalPan,
+    setDigitalPan,
   } = cap;
+
+  // デジタルズーム表示用：プレビュー枠と映像の実解像度を測る。
+  const [boxSize, setBoxSize] = useState({ width: 0, height: 0 });
+  const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    panX: number;
+    panY: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const box = previewBoxRef.current;
+    if (!box) return;
+    const update = () =>
+      setBoxSize({ width: box.clientWidth, height: box.clientHeight });
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(update);
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [previewBoxRef, support.kind]);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    const update = () =>
+      setNaturalSize({ width: el.videoWidth, height: el.videoHeight });
+    update();
+    el.addEventListener("loadedmetadata", update);
+    el.addEventListener("resize", update);
+    return () => {
+      el.removeEventListener("loadedmetadata", update);
+      el.removeEventListener("resize", update);
+    };
+  }, [videoRef, cameraOn]);
+
+  const digitalActive =
+    zoomMode === "digital" && digitalZoom > 1 && cameraOn;
+  const zoomRect =
+    digitalActive && boxSize.width > 0 && naturalSize.width > 0
+      ? computeZoomRect(
+          boxSize.width,
+          boxSize.height,
+          naturalSize.width,
+          naturalSize.height,
+          digitalZoom,
+          digitalPan.x,
+          digitalPan.y,
+        )
+      : null;
+
+  const handlePanStart = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!zoomRect) return;
+    dragRef.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      panX: digitalPan.x,
+      panY: digitalPan.y,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const handlePanMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || e.pointerId !== drag.pointerId || !zoomRect) return;
+    const maxShiftX = (zoomRect.width - boxSize.width) / 2;
+    const maxShiftY = (zoomRect.height - boxSize.height) / 2;
+    setDigitalPan({
+      x:
+        maxShiftX > 0
+          ? Math.min(
+              1,
+              Math.max(-1, drag.panX + (e.clientX - drag.startX) / maxShiftX),
+            )
+          : 0,
+      y:
+        maxShiftY > 0
+          ? Math.min(
+              1,
+              Math.max(-1, drag.panY + (e.clientY - drag.startY) / maxShiftY),
+            )
+          : 0,
+    });
+  };
+  const handlePanEnd = () => {
+    dragRef.current = null;
+  };
+
+  const videoStyle: CSSProperties = {};
+  if (brightnessMode === "sw" && brightnessPct !== 100) {
+    // ソフトウェア明るさ補正はプレビューにも同じ値を当てる。
+    videoStyle.filter = `brightness(${brightnessPct / 100})`;
+  }
+  if (zoomRect) {
+    videoStyle.left = zoomRect.left;
+    videoStyle.top = zoomRect.top;
+    videoStyle.width = zoomRect.width;
+    videoStyle.height = zoomRect.height;
+    videoStyle.maxWidth = "none";
+    videoStyle.objectFit = "fill";
+  }
 
   if (support.kind !== "ok" && images.length === 0 && !video) return null;
 
@@ -478,13 +848,21 @@ export function CaptureMediaDisplay({
       className={`sticky top-[108px] z-30 -mx-4 flex flex-col gap-2 border-b border-[var(--border)] bg-[var(--bg)] px-4 py-2 shadow-[0_8px_16px_-12px_rgba(0,0,0,0.4)] sm:-mx-6 sm:px-6 lg:static lg:z-auto lg:mx-0 lg:min-h-0 lg:gap-3 lg:border-b-0 lg:bg-transparent lg:px-0 lg:py-0 lg:shadow-none ${className}`}
     >
       {support.kind === "ok" && (
-        <div className="relative overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-[var(--video-bg)] lg:min-h-0 lg:flex-1">
+        <div
+          ref={previewBoxRef}
+          onPointerDown={handlePanStart}
+          onPointerMove={handlePanMove}
+          onPointerUp={handlePanEnd}
+          onPointerCancel={handlePanEnd}
+          className={`relative h-44 overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-[var(--video-bg)] sm:h-60 lg:min-h-0 lg:flex-1 ${zoomRect ? "cursor-grab touch-none" : ""}`}
+        >
           <video
             ref={videoRef}
             playsInline
             muted
             aria-label="スコープのライブプレビュー"
-            className="h-44 w-full object-contain sm:h-60 lg:h-full"
+            style={videoStyle}
+            className="absolute inset-0 h-full w-full object-contain"
           />
           {!cameraOn && (
             <p className="pointer-events-none absolute inset-0 flex items-center justify-center px-4 text-center text-base text-white/75">
@@ -609,7 +987,58 @@ export function CaptureControls({
     handleFiles,
     handleVideoFile,
     removeVideo,
+    resolutionKey,
+    resolutionOptions,
+    changeResolution,
+    currentSize,
+    brightnessMode,
+    brightnessRange,
+    brightnessPct,
+    hwBrightness,
+    setBrightnessValue,
+    zoomMode,
+    zoomRange,
+    hwZoom,
+    digitalZoom,
+    setZoomValue,
+    resetZoomView,
   } = cap;
+
+  // 調整バーのスライダー表示値（ハードウェア制御と補正で単位が違うため分ける）。
+  const brightnessSlider = brightnessRange
+    ? {
+        min: brightnessRange.min,
+        max: brightnessRange.max,
+        step: brightnessRange.step ?? (brightnessRange.max - brightnessRange.min) / 100,
+        value: hwBrightness ?? brightnessRange.min,
+        label: `${Math.round(((hwBrightness ?? brightnessRange.min) * 10)) / 10}`,
+      }
+    : {
+        min: 50,
+        max: 150,
+        step: 1,
+        value: brightnessPct,
+        label: `${brightnessPct}%`,
+      };
+  const zoomSlider = zoomRange
+    ? {
+        min: zoomRange.min,
+        max: zoomRange.max,
+        step: zoomRange.step ?? (zoomRange.max - zoomRange.min) / 100,
+        value: hwZoom ?? zoomRange.min,
+        label: `${Math.round((hwZoom ?? zoomRange.min) * 10) / 10}`,
+      }
+    : {
+        min: 1,
+        max: 3,
+        step: 0.1,
+        value: digitalZoom,
+        label: `${digitalZoom.toFixed(1)}倍`,
+      };
+  /** ソフトウェア補正（明るさ・デジタルズーム）が効いているか。動画には反映されない。 */
+  const softwareCorrectionActive =
+    (brightnessMode === "sw" && brightnessPct !== 100) ||
+    (zoomMode === "digital" && digitalZoom > 1);
 
   return (
     <section aria-label="撮影の操作" className={`flex flex-col gap-4 ${className}`}>
@@ -679,6 +1108,112 @@ export function CaptureControls({
               </p>
             )}
           </div>
+
+          {cameraOn && (
+            <div className="flex flex-col gap-4 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-card)]">
+              <h3 className="text-lg font-bold text-[var(--text)]">
+                カメラの調整
+              </h3>
+
+              <label className="flex flex-col gap-1 text-base font-medium text-[var(--text)]">
+                解像度
+                <select
+                  aria-label="解像度を選ぶ"
+                  disabled={recording}
+                  className="min-h-14 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-3 text-lg text-[var(--text)] disabled:opacity-40"
+                  value={resolutionKey}
+                  onChange={(e) =>
+                    changeResolution(e.target.value as ResolutionKey)
+                  }
+                >
+                  {resolutionOptions.map((preset) => (
+                    <option key={preset.key} value={preset.key}>
+                      {preset.label}
+                    </option>
+                  ))}
+                </select>
+                {currentSize && (
+                  <span className="text-sm font-normal text-[var(--dim)]">
+                    現在の映像：{currentSize.width} × {currentSize.height}
+                  </span>
+                )}
+              </label>
+
+              <div className="flex flex-col gap-1">
+                <label
+                  htmlFor="cap-brightness"
+                  className="flex items-center gap-2 text-base font-medium text-[var(--text)]"
+                >
+                  明るさ
+                  <span className="rounded border border-[var(--border)] px-1.5 py-0.5 text-xs font-normal text-[var(--dim)]">
+                    {brightnessMode === "hw" ? "カメラ側" : "補正"}
+                  </span>
+                  <span className="ml-auto text-base font-bold">
+                    {brightnessSlider.label}
+                  </span>
+                </label>
+                <input
+                  id="cap-brightness"
+                  type="range"
+                  aria-label="明るさ"
+                  className="min-h-11 w-full"
+                  style={{ accentColor: "var(--accent)" }}
+                  min={brightnessSlider.min}
+                  max={brightnessSlider.max}
+                  step={brightnessSlider.step}
+                  value={brightnessSlider.value}
+                  onChange={(e) => setBrightnessValue(Number(e.target.value))}
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label
+                  htmlFor="cap-zoom"
+                  className="flex items-center gap-2 text-base font-medium text-[var(--text)]"
+                >
+                  ズーム
+                  <span className="rounded border border-[var(--border)] px-1.5 py-0.5 text-xs font-normal text-[var(--dim)]">
+                    {zoomMode === "hw" ? "カメラ側" : "補正"}
+                  </span>
+                  <span className="ml-auto text-base font-bold">
+                    {zoomSlider.label}
+                  </span>
+                </label>
+                <input
+                  id="cap-zoom"
+                  type="range"
+                  aria-label="ズーム"
+                  className="min-h-11 w-full"
+                  style={{ accentColor: "var(--accent)" }}
+                  min={zoomSlider.min}
+                  max={zoomSlider.max}
+                  step={zoomSlider.step}
+                  value={zoomSlider.value}
+                  onChange={(e) => setZoomValue(Number(e.target.value))}
+                />
+                <div className="flex flex-wrap items-center gap-3">
+                  {zoomMode === "digital" && digitalZoom > 1 && (
+                    <span className="text-sm text-[var(--dim)]">
+                      拡大中は、プレビューをドラッグすると表示位置を動かせます
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={resetZoomView}
+                    className="min-h-11 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-4 text-base font-medium text-[var(--text)]"
+                  >
+                    ズームを戻す
+                  </button>
+                </div>
+              </div>
+
+              {softwareCorrectionActive && (
+                <p className="text-sm leading-relaxed text-[var(--dim)]">
+                  明るさ補正とデジタルズームは静止画にのみ反映されます。動画は元の映像のまま録画されます。
+                </p>
+              )}
+            </div>
+          )}
 
           <button
             type="button"
