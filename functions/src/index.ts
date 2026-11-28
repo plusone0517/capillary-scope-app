@@ -355,7 +355,13 @@ export const analyzeImagePatterns = onCall<
       return { configured: false, candidates: [] };
     }
 
-    const model = process.env.OPENAI_VISION_MODEL || "gpt-4o";
+    const model = process.env.OPENAI_VISION_MODEL || "gpt-6-luna";
+    // 推論系モデル（gpt-5 / gpt-6 系）は Chat Completions で temperature を
+    // 受け付けないため、reasoning_effort に置き換える。
+    const sampling: Record<string, unknown> =
+      /^gpt-[56]/.test(model) || /^o[0-9]/.test(model)
+        ? { reasoning_effort: "none" }
+        : { temperature: 0 };
 
     let response: Response;
     try {
@@ -367,9 +373,9 @@ export const analyzeImagePatterns = onCall<
         },
         body: JSON.stringify({
           model,
-          // 再現性のため 0 に固定する（同じ画像には同じ応答が返りやすくし、
+          // 再現性のため揺らぎを抑える（同じ画像には同じ応答が返りやすくし、
           // 誰が検査しても同じ回答に近づける）。
-          temperature: 0,
+          ...sampling,
           response_format: { type: "json_object" },
           messages: [
             {
@@ -640,7 +646,12 @@ export const draftReportText = onCall<
       return { configured: false, summary: "", advice: "" };
     }
 
-    const model = process.env.OPENAI_TEXT_MODEL || "gpt-4o";
+    const model = process.env.OPENAI_TEXT_MODEL || "gpt-6-luna";
+    // 推論系モデルは temperature を受け付けないため reasoning_effort に置き換える。
+    const sampling: Record<string, unknown> =
+      /^gpt-[56]/.test(model) || /^o[0-9]/.test(model)
+        ? { reasoning_effort: "low" }
+        : { temperature: 0.4 };
 
     let response: Response;
     try {
@@ -652,7 +663,7 @@ export const draftReportText = onCall<
         },
         body: JSON.stringify({
           model,
-          temperature: 0.4,
+          ...sampling,
           response_format: { type: "json_object" },
           messages: [
             {
