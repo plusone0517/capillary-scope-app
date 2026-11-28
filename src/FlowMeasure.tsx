@@ -23,6 +23,13 @@ type Kymograph = {
   frames: number;
   fps: number;
   durationSec: number;
+  /**
+   * 解析用ピクセル1つが、元の動画の何ピクセルにあたるか（元の幅÷解析幅）。
+   * 傾き（解析ピクセル/フレーム）を元の動画のピクセル基準に戻すために使う。
+   * 校正値（μm/px）は元の動画のピクセルあたりの値なので、速度も
+   * 元のピクセル基準でないと mm/秒への換算がずれる。
+   */
+  pxScale: number;
 };
 
 type Props = {
@@ -221,6 +228,11 @@ export function FlowMeasure({
     })();
     return () => {
       cancelled = true;
+      // Blob URL に変換していた場合は解放する（元のURLの場合は startsWith で判定）。
+      if (localUrlRef.current?.startsWith("blob:")) {
+        URL.revokeObjectURL(localUrlRef.current);
+      }
+      localUrlRef.current = null;
     };
   }, [videoUrl]);
 
@@ -427,6 +439,7 @@ export function FlowMeasure({
       frames: rows.length,
       fps: rows.length / duration,
       durationSec: duration,
+      pxScale: video.videoWidth > 0 && w > 0 ? video.videoWidth / w : 1,
     };
     setKymo(built);
     setPhase("kymo");
@@ -444,8 +457,10 @@ export function FlowMeasure({
     return Number.isFinite(n) && n > 0 ? n : null;
   })();
 
+  // 傾きは解析用ピクセル基準のため、元の動画のピクセル基準に戻してから
+  // 速度とする（校正値 μm/px と同じ基準にそろえる）。
   const speedPxPerSec =
-    slope != null && kymo ? Math.abs(slope) * kymo.fps : null;
+    slope != null && kymo ? Math.abs(slope) * kymo.fps * kymo.pxScale : null;
   const speedMmPerSec =
     speedPxPerSec != null && calibNum != null
       ? (speedPxPerSec * calibNum) / 1000

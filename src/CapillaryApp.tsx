@@ -6,9 +6,11 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   api,
+  describeFirebaseError,
   type CreateObservationArgs,
   type UpdateObservationArgs,
 } from "./api";
+import { useAuth } from "./auth/AuthGate";
 import {
   CaptureControls,
   CaptureIntro,
@@ -27,6 +29,7 @@ isDummySubject,
 useQrDataUrl,
 } from "./ReportView";
 import {
+captureFrameFromVideoUrl,
 fileToCaptured,
 fileToCapturedVideo,
 type CapturedImage,
@@ -668,6 +671,38 @@ function NewScreen({ go, trialMode }: { go: (v: View) => void; trialMode: boolea
     onVideoChange: setVideo,
   });
 
+  // 動画だけが添付されていて静止画が無いときは、動画から静止画を1枚
+  // 切り出して代表画像にする（AI候補・自動計測は静止画が対象のため）。
+  // 切り出しは動画ごとに1回だけ。切り出した静止画を削除しても、
+  // 同じ動画から自動で作り直すことはしない。
+  const frameDerivedFor = useRef<string | null>(null);
+  const [frameNote, setFrameNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!video || images.length > 0) return;
+    if (frameDerivedFor.current === video.previewUrl) return;
+    frameDerivedFor.current = video.previewUrl;
+    let cancelled = false;
+    void captureFrameFromVideoUrl(video.previewUrl)
+      .then((frame) => {
+        if (cancelled) return;
+        setImages((current) => (current.length > 0 ? current : [frame]));
+        setPrimaryIndex(0);
+        setFrameNote(
+          "動画から静止画を切り出して代表画像にしました。AI候補と自動計測は、この静止画を対象に使えます。",
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFrameNote(
+            "動画からの静止画の切り出しができませんでした。AI候補・自動計測を使う場合は、静止画も撮影してください。",
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [video, images.length]);
+
   const create = useMutation({
     mutationFn: async () => {
       const payload = findingsToPayload(form);
@@ -680,7 +715,7 @@ function NewScreen({ go, trialMode }: { go: (v: View) => void; trialMode: boolea
         primaryIndex: images.length > 0 ? primaryIndex : undefined,
         video: video
           ? {
-              dataBase64: video.dataBase64,
+              blob: video.blob,
               mimeType: video.mimeType,
               durationSec: video.durationSec ?? undefined,
             }
@@ -692,11 +727,7 @@ function NewScreen({ go, trialMode }: { go: (v: View) => void; trialMode: boolea
       go({ kind: "report", id: res.id });
     },
     onError: (e) => {
-      setError(
-        e instanceof Error
-          ? `保存できませんでした：${e.message}`
-          : "保存できませんでした。もう一度お試しください。",
-      );
+      setError(`保存できませんでした：${describeFirebaseError(e)}`);
     },
   });
 
@@ -739,6 +770,11 @@ function NewScreen({ go, trialMode }: { go: (v: View) => void; trialMode: boolea
             className="order-1 scroll-mt-32 lg:scroll-mt-4"
           />
           <CaptureControls cap={cap} className="order-3" />
+          {frameNote && (
+            <p className="order-3 rounded-[var(--radius)] bg-[var(--paper)] p-3 text-base leading-relaxed text-[var(--text)]">
+              {frameNote}
+            </p>
+          )}
           <div id="obs-step-findings" className="order-4 scroll-mt-32 lg:scroll-mt-4">
             <FindingsForm
               value={form}
@@ -795,6 +831,11 @@ function ReportScreen({
   trialMode: boolean;
 }) {
   const queryClient = useQueryClient();
+  const authState = useAuth();
+  // 観察の削除は Firestore ルールで管理者（admin）のみ許可されているため、
+  // ボタンも管理者にだけ出す（一般スタッフでは必ず失敗する操作を出さない）。
+  const isAdmin =
+    authState.status === "ready" && authState.staff.role === "admin";
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const detail = useQuery({
@@ -836,8 +877,7 @@ function ReportScreen({
           : null,
       );
     },
-    onError: (e) =>
-      setActionError(e instanceof Error ? e.message : "確定に失敗しました"),
+    onError: (e) => setActionError(describeFirebaseError(e)),
   });
 
   const remove = useMutation({
@@ -846,8 +886,7 @@ function ReportScreen({
       void queryClient.invalidateQueries({ queryKey: ["observations"] });
       go({ kind: "list" });
     },
-    onError: (e) =>
-      setActionError(e instanceof Error ? e.message : "削除に失敗しました"),
+    onError: (e) => setActionError(describeFirebaseError(e)),
   });
 
   if (detail.isPending) return <LoadingState />;
@@ -948,6 +987,25 @@ function ReportScreen({
         <p className="no-print text-base text-[var(--dim)]">{claimNote}</p>
       )}
 
+      {/* 確定済みでも受け取りトークンが手元に無い場合（発行に失敗した、
+          別の端末で開いた等）は、ここから発行し直せる。
+          finalizeObservation は確定済みでも再発行だけを行う。 */}
+      {obs.status === "finalized" && !obs.receiveToken && (
+        <div className="no-print flex flex-wrap items-center gap-3">
+          <p className="text-base text-[var(--dim)]">
+            受け取りQRコードはまだ発行されていません。
+          </p>
+          <button
+            type="button"
+            disabled={finalize.isPending}
+            onClick={() => finalize.mutate()}
+            className="min-h-14 rounded-[var(--radius)] border-2 border-[var(--accent)] bg-[var(--surface)] px-5 text-lg font-bold text-[var(--accent-strong)] disabled:opacity-40"
+          >
+            {finalize.isPending ? "発行しています…" : "受け取りQRを発行する"}
+          </button>
+        </div>
+      )}
+
       <div className="overflow-hidden rounded-[var(--radius)] border border-[var(--border)] shadow-sm">
         <ReportBody
           obs={obs}
@@ -961,6 +1019,7 @@ function ReportScreen({
         <ReceiveQr id={obs.reportId} token={obs.receiveToken} qrDataUrl={qrDataUrl} />
       )}
 
+      {isAdmin && (
       <div className="no-print flex flex-col gap-3 border-t border-[var(--border)] pt-4">
         {confirmDelete ? (
           <div className="flex flex-wrap items-center gap-3">
@@ -993,6 +1052,7 @@ function ReportScreen({
           </button>
         )}
       </div>
+      )}
     </div>
   );
 }
@@ -1078,8 +1138,7 @@ function EditScreen({
       refresh();
       go({ kind: "report", id });
     },
-    onError: (e) =>
-      setError(e instanceof Error ? `保存できませんでした：${e.message}` : "保存できませんでした"),
+    onError: (e) => setError(`保存できませんでした：${describeFirebaseError(e)}`),
   });
 
   const addImage = useMutation({
@@ -1092,23 +1151,21 @@ function EditScreen({
       });
     },
     onSuccess: refresh,
-    onError: (e) =>
-      setError(e instanceof Error ? e.message : "画像の追加に失敗しました"),
+    onError: (e) => setError(describeFirebaseError(e)),
   });
 
   const removeImage = useMutation({
-    mutationFn: (imageId: string) => api.removeImage({ imageId }),
+    mutationFn: (imageId: string) =>
+      api.removeImage({ imageId, observationId: id }),
     onSuccess: refresh,
-    onError: (e) =>
-      setError(e instanceof Error ? e.message : "画像の削除に失敗しました"),
+    onError: (e) => setError(describeFirebaseError(e)),
   });
 
   const setPrimary = useMutation({
     mutationFn: (imageId: string) =>
       api.setPrimaryImage({ observationId: id, imageId }),
     onSuccess: refresh,
-    onError: (e) =>
-      setError(e instanceof Error ? e.message : "代表画像の変更に失敗しました"),
+    onError: (e) => setError(describeFirebaseError(e)),
   });
 
   const videoFileRef = useRef<HTMLInputElement | null>(null);
@@ -1118,22 +1175,47 @@ function EditScreen({
       return api.setVideo({
         observationId: id,
         video: {
-          dataBase64: captured.dataBase64,
+          blob: captured.blob,
           mimeType: captured.mimeType,
           durationSec: captured.durationSec ?? undefined,
         },
       });
     },
     onSuccess: refresh,
-    onError: (e) =>
-      setError(e instanceof Error ? e.message : "動画の設定に失敗しました"),
+    onError: (e) => setError(describeFirebaseError(e)),
   });
 
   const removeVideo = useMutation({
     mutationFn: () => api.removeVideo({ observationId: id }),
     onSuccess: refresh,
-    onError: (e) =>
-      setError(e instanceof Error ? e.message : "動画の削除に失敗しました"),
+    onError: (e) => setError(describeFirebaseError(e)),
+  });
+
+  // 保存済みの動画から静止画を切り出して画像として追加する。
+  // 動画だけの観察でも AI候補・自動計測（静止画が対象）を使えるようにするため。
+  const extractStill = useMutation({
+    mutationFn: async () => {
+      const current = detail.data?.observation;
+      if (!current?.video) throw new Error("動画が登録されていません");
+      const blob = await api.fetchStoredBlob(current.video.storagePath);
+      const url = URL.createObjectURL(blob);
+      try {
+        const frame = await captureFrameFromVideoUrl(url);
+        try {
+          return await api.addImage({
+            observationId: id,
+            image: { dataBase64: frame.dataBase64, mimeType: frame.mimeType },
+            makePrimary: current.images.length === 0,
+          });
+        } finally {
+          URL.revokeObjectURL(frame.previewUrl);
+        }
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    },
+    onSuccess: refresh,
+    onError: (e) => setError(describeFirebaseError(e)),
   });
 
   if (detail.isPending || !form) return <LoadingState />;
@@ -1147,6 +1229,10 @@ function EditScreen({
   const handleSave = () => {
     if (!form.subjectName.trim()) {
       setError("対象者名を入力してください。");
+      return;
+    }
+    if (!form.observedAtLocal || Number.isNaN(new Date(form.observedAtLocal).getTime())) {
+      setError("観察日時を入力してください。");
       return;
     }
     setError(null);
@@ -1338,13 +1424,32 @@ function EditScreen({
           <section aria-label="登録済みの動画" className="order-3 flex flex-col gap-3">
             <h2 className="text-xl font-bold text-[var(--text)]">登録済みの動画</h2>
             {obs.video ? (
-              <video
-                src={obs.video.url}
-                controls
-                playsInline
-                aria-label="登録済みの観察動画"
-                className="aspect-video w-full rounded-[var(--radius)] border border-[var(--border)] bg-[var(--video-bg)]"
-              />
+              <>
+                <video
+                  src={obs.video.url}
+                  controls
+                  playsInline
+                  aria-label="登録済みの観察動画"
+                  className="aspect-video w-full rounded-[var(--radius)] border border-[var(--border)] bg-[var(--video-bg)]"
+                />
+                {obs.images.length < 5 && (
+                  <div className="flex flex-col gap-1">
+                    <button
+                      type="button"
+                      disabled={extractStill.isPending}
+                      onClick={() => extractStill.mutate()}
+                      className="min-h-14 self-start rounded-[var(--radius)] border-2 border-[var(--accent)] bg-[var(--surface)] px-5 text-lg font-bold text-[var(--accent-strong)] disabled:opacity-40"
+                    >
+                      {extractStill.isPending
+                        ? "切り出しています…"
+                        : "動画から静止画を切り出して画像に追加する"}
+                    </button>
+                    <p className="text-base text-[var(--dim)]">
+                      AI候補と自動計測は静止画が対象です。静止画が無い観察では、動画から切り出した1枚を代表画像として追加できます。
+                    </p>
+                  </div>
+                )}
+              </>
             ) : (
               <p className="text-lg text-[var(--dim)]">動画は登録されていません。</p>
             )}

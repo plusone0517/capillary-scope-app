@@ -93,6 +93,8 @@ export type ObservationImageRecord = {
 export type ObservationVideoRecord = {
   url: string;
   mimeType: string;
+  /** Storage パス（動画から静止画を切り出すときなどに、実体を読み直すために使う）。 */
+  storagePath: string;
   /** MediaRef に長さの項目がないため、保存済み動画では常に null。 */
   durationSec: number | null;
 };
@@ -202,7 +204,13 @@ export type AnalyzeImagePatternsResult = {
 };
 
 export type VideoInput = {
-  dataBase64: string;
+  /**
+   * 動画の実体。Blob があればそのままアップロードする（base64 化しないため、
+   * 大きな動画でもメモリを圧迫しない）。dataBase64 は Blob を持てない
+   * 経路のための予備で、どちらか一方を指定する。
+   */
+  blob?: Blob;
+  dataBase64?: string;
   mimeType: "video/webm" | "video/mp4";
   durationSec?: number;
 };
@@ -419,6 +427,47 @@ function buildSummaryText(r: {
 
 /* ================= 共通ヘルパー ================= */
 
+/**
+ * Firebase のエラーを、スタッフ向けの平易な日本語に置き換える。
+ * SDK の英語メッセージ（例：storage/unauthorized の長い文）をそのまま
+ * 画面に出さないために、画面側のエラー表示はこの関数を通す。
+ * コードが判定できない場合は、元のメッセージをそのまま返す。
+ */
+export function describeFirebaseError(e: unknown): string {
+  const code =
+    typeof e === "object" && e !== null && "code" in e
+      ? String((e as { code?: unknown }).code ?? "")
+      : "";
+  switch (code) {
+    case "storage/unauthorized":
+      return "保存先へのアクセスが許可されませんでした。管理者に、保存先（Storage）の設定を確認するようお伝えください。";
+    case "storage/unauthenticated":
+      return "ログインの有効期限が切れている可能性があります。一度ログアウトして、ログインし直してください。";
+    case "storage/object-not-found":
+      return "保存済みのファイルが見つかりませんでした。データが不完全な可能性があります。管理者にお伝えください。";
+    case "storage/quota-exceeded":
+      return "保存容量の上限に達しています。管理者にお伝えください。";
+    case "storage/retry-limit-exceeded":
+      return "通信が不安定で、保存を完了できませんでした。ネットワークを確認して、もう一度お試しください。";
+    case "storage/canceled":
+      return "保存が中断されました。もう一度お試しください。";
+    case "permission-denied":
+    case "firestore/permission-denied":
+      return "この操作を行う権限がありません。スタッフ登録の状態を管理者に確認してください。";
+    case "unauthenticated":
+      return "ログインが必要です。ログインし直してください。";
+    case "unavailable":
+    case "firestore/unavailable":
+      return "サーバーに接続できませんでした。ネットワークを確認して、もう一度お試しください。";
+    case "deadline-exceeded":
+      return "処理に時間がかかりすぎました。もう一度お試しください。";
+    default:
+      break;
+  }
+  if (e instanceof Error && e.message) return e.message;
+  return "処理に失敗しました。もう一度お試しください。";
+}
+
 function currentUid(): string {
   const uid = auth.currentUser?.uid;
   if (!uid) throw new Error("ログインが必要です");
@@ -566,20 +615,36 @@ async function toRecord(
   const images: ObservationImageRecord[] = [];
   for (const media of obs.images ?? []) {
     imageOwnerCache.set(media.storagePath, id);
+    // 1ファイルだけ URL が取れなくても、レポート全体を開けるようにする
+    // （URL が空の画像は表示側で「画像なし」と同じ扱いになる）。
+    let url = "";
+    try {
+      url = await downloadUrl(media.storagePath);
+    } catch {
+      url = "";
+    }
     images.push({
       id: media.storagePath,
-      url: await downloadUrl(media.storagePath),
+      url,
       isPrimary: media.isPrimary ?? false,
     });
   }
   const firstVideo = (obs.videos ?? [])[0];
-  const video: ObservationVideoRecord | null = firstVideo
-    ? {
-        url: await downloadUrl(firstVideo.storagePath),
-        mimeType: firstVideo.contentType,
-        durationSec: null,
-      }
-    : null;
+  let video: ObservationVideoRecord | null = null;
+  if (firstVideo) {
+    let url = "";
+    try {
+      url = await downloadUrl(firstVideo.storagePath);
+    } catch {
+      url = "";
+    }
+    video = {
+      url,
+      mimeType: firstVideo.contentType,
+      storagePath: firstVideo.storagePath,
+      durationSec: null,
+    };
+  }
 
   const base = {
     finger: obs.finger,
@@ -677,6 +742,14 @@ async function uploadVideo(
 ): Promise<MediaRef> {
   const ext = video.mimeType === "video/mp4" ? "mp4" : "webm";
   const path = `capillary/${patientId}/${observationId}/videos/video-${newFileToken()}.${ext}`;
+  // Blob があればそのまま送る（base64 化すると大きな動画でメモリを圧迫する）。
+  if (video.blob) {
+    await uploadBytes(storageRef(storage, path), video.blob, {
+      contentType: video.mimeType,
+    });
+    return { storagePath: path, contentType: video.mimeType, sizeBytes: video.blob.size };
+  }
+  if (!video.dataBase64) throw new Error("動画データがありません");
   const bytes = base64ToBytes(video.dataBase64);
   await uploadBytes(storageRef(storage, path), bytes, {
     contentType: video.mimeType,
@@ -820,23 +893,32 @@ export const api = {
     const obsRef = doc(collection(db, "observations"));
     const primaryIndex = args.primaryIndex ?? 0;
     const images: MediaRef[] = [];
-    for (const [i, image] of args.images.entries()) {
-      const media = await uploadImage(patientId, obsRef.id, image, i);
-      images.push({ ...media, isPrimary: i === primaryIndex });
-    }
     const videos: MediaRef[] = [];
-    if (args.video) {
-      videos.push(await uploadVideo(patientId, obsRef.id, args.video));
+    try {
+      for (const [i, image] of args.images.entries()) {
+        const media = await uploadImage(patientId, obsRef.id, image, i);
+        images.push({ ...media, isPrimary: i === primaryIndex });
+      }
+      if (args.video) {
+        videos.push(await uploadVideo(patientId, obsRef.id, args.video));
+      }
+      await setDoc(obsRef, {
+        ...observationDataFromInput(args, patientId),
+        images,
+        videos,
+        flowVelocity: null,
+        status: "draft",
+        createdBy: currentUid(),
+        createdAt: serverTimestamp(),
+      });
+    } catch (e) {
+      // 途中で失敗したら、アップロード済みのファイルを片付けてから投げ直す
+      // （観察ドキュメントから参照されない孤児ファイルを残さない）。
+      for (const media of [...images, ...videos]) {
+        await deleteStorageQuietly(media.storagePath);
+      }
+      throw e;
     }
-    await setDoc(obsRef, {
-      ...observationDataFromInput(args, patientId),
-      images,
-      videos,
-      flowVelocity: null,
-      status: "draft",
-      createdBy: currentUid(),
-      createdAt: serverTimestamp(),
-    });
     await writeAudit("observation.create", "observation", obsRef.id);
     return { id: obsRef.id };
   },
@@ -888,8 +970,12 @@ export const api = {
     return { imageId: media.storagePath };
   },
 
-  async removeImage(args: { imageId: string }): Promise<{ ok: true }> {
-    const observationId = imageOwnerCache.get(args.imageId);
+  async removeImage(args: {
+    imageId: string;
+    /** 分かっている場合は呼び出し側から渡す（キャッシュ依存を避ける）。 */
+    observationId?: string;
+  }): Promise<{ ok: true }> {
+    const observationId = args.observationId ?? imageOwnerCache.get(args.imageId);
     if (!observationId) {
       throw new Error(
         "画像の所属が分かりませんでした。レポートを開き直してからお試しください。",
@@ -900,14 +986,16 @@ export const api = {
       (m) => m.storagePath === args.imageId,
     );
     if (!target) return { ok: true };
-    await deleteStorageQuietly(target.storagePath);
     let next = (data.images ?? []).filter(
       (m) => m.storagePath !== args.imageId,
     );
     if (target.isPrimary && next.length > 0) {
       next = next.map((m, i) => ({ ...m, isPrimary: i === 0 }));
     }
+    // 先にドキュメントを更新してから実体を消す（更新が失敗したときに、
+    // ドキュメントが消えたファイルを指したままになるのを避ける）。
     await updateDoc(ref, { images: next, updatedAt: serverTimestamp() });
+    await deleteStorageQuietly(target.storagePath);
     imageOwnerCache.delete(args.imageId);
     return { ok: true };
   },
@@ -930,33 +1018,42 @@ export const api = {
     video: VideoInput;
   }): Promise<{ ok: true }> {
     const { ref, data } = await getObservationDoc(args.observationId);
-    for (const old of data.videos ?? []) {
-      await deleteStorageQuietly(old.storagePath);
-    }
+    const oldVideos = data.videos ?? [];
+    // 新しい動画を先にアップロードし、ドキュメントを差し替えてから
+    // 旧動画の実体を消す（途中で失敗しても旧動画が壊れないようにする）。
     const media = await uploadVideo(
       data.patientId,
       args.observationId,
       args.video,
     );
-    // 動画を差し替えたら、旧動画で測った速度は無効になるため消す（試用版と同じ）。
-    await updateDoc(ref, {
-      videos: [media],
-      flowVelocity: null,
-      updatedAt: serverTimestamp(),
-    });
+    try {
+      // 動画を差し替えたら、旧動画で測った速度は無効になるため消す（試用版と同じ）。
+      await updateDoc(ref, {
+        videos: [media],
+        flowVelocity: null,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (e) {
+      await deleteStorageQuietly(media.storagePath);
+      throw e;
+    }
+    for (const old of oldVideos) {
+      await deleteStorageQuietly(old.storagePath);
+    }
     return { ok: true };
   },
 
   async removeVideo(args: { observationId: string }): Promise<{ ok: true }> {
     const { ref, data } = await getObservationDoc(args.observationId);
-    for (const old of data.videos ?? []) {
-      await deleteStorageQuietly(old.storagePath);
-    }
+    // removeImage と同じく、先にドキュメントを更新してから実体を消す。
     await updateDoc(ref, {
       videos: [],
       flowVelocity: null,
       updatedAt: serverTimestamp(),
     });
+    for (const old of data.videos ?? []) {
+      await deleteStorageQuietly(old.storagePath);
+    }
     return { ok: true };
   },
 
@@ -1050,6 +1147,9 @@ export const api = {
   async deleteObservation(args: { id: string }): Promise<{ ok: true }> {
     const { ref, data } = await getObservationDoc(args.id);
     const reportInfo = await findReportForObservation(args.id);
+    // 本体のドキュメントを先に消す。権限などで失敗した場合は、
+    // レポートやファイルにはまだ触れていない状態で止まる。
+    await deleteDoc(ref);
     if (reportInfo) {
       await deleteDoc(doc(db, "reports", reportInfo.id));
     }
@@ -1060,7 +1160,6 @@ export const api = {
       await deleteStorageQuietly(media.storagePath);
       imageOwnerCache.delete(media.storagePath);
     }
-    await deleteDoc(ref);
     // AuditAction に削除の種別がないため、削除の監査ログは書かない。
     return { ok: true };
   },
@@ -1165,5 +1264,15 @@ export const api = {
       dataBase64,
       mimeType: blob.type === "image/png" ? "image/png" : "image/jpeg",
     };
+  },
+
+  /**
+   * 保存済みファイル（Storage）の実体を Blob で読み出す。
+   * 編集画面で「保存済みの動画から静止画を切り出す」ときに使う
+   * （ダウンロードURL経由だと canvas の読み取り制限にかかる場合があるため、
+   * 認証つきの SDK 取得で Blob 化してから扱う）。
+   */
+  async fetchStoredBlob(storagePath: string): Promise<Blob> {
+    return getBlob(storageRef(storage, storagePath));
   },
 };

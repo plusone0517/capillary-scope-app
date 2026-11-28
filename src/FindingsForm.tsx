@@ -19,9 +19,10 @@ import {
   interventionCategories,
   interventionTimings,
 } from "./trial";
-import type {
-  AiPatternCandidate,
-  AnalyzeImagePatternsResult,
+import {
+  describeFirebaseError,
+  type AiPatternCandidate,
+  type AnalyzeImagePatternsResult,
 } from "./api";
 
 export type InterventionDraft = {
@@ -253,11 +254,7 @@ export function FindingsForm({
       setAiStatus("done");
     } catch (e) {
       setAiStatus("error");
-      setAiError(
-        e instanceof Error
-          ? `候補を取得できませんでした：${e.message}`
-          : "候補を取得できませんでした。時間をおいてもう一度お試しください。",
-      );
+      setAiError(`候補を取得できませんでした：${describeFirebaseError(e)}`);
     }
   };
 

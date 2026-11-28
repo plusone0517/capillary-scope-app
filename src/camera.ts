@@ -89,7 +89,11 @@ export async function fileToCaptured(file: File): Promise<CapturedImage> {
 /* ================= 動画 ================= */
 
 export type CapturedVideo = {
-  dataBase64: string;
+  /**
+   * 動画の実体（Blob のまま保持する）。保存時は base64 化せずそのまま
+   * アップロードするため、長い動画でもメモリを圧迫しない。
+   */
+  blob: Blob;
   mimeType: "video/webm" | "video/mp4";
   previewUrl: string;
   durationSec: number | null;
@@ -114,9 +118,8 @@ export async function blobToCapturedVideo(
   durationSec: number | null,
 ): Promise<CapturedVideo> {
   const mimeType = blob.type.includes("mp4") ? "video/mp4" : "video/webm";
-  const dataBase64 = await blobToBase64(blob);
   return {
-    dataBase64,
+    blob,
     mimeType,
     previewUrl: URL.createObjectURL(blob),
     durationSec,
@@ -126,7 +129,6 @@ export async function blobToCapturedVideo(
 /** 動画ファイルを取り込む（専用ソフトで撮った動画など）。 */
 export async function fileToCapturedVideo(file: File): Promise<CapturedVideo> {
   const mimeType = file.type.includes("mp4") ? "video/mp4" : "video/webm";
-  const dataBase64 = await blobToBase64(file);
   const previewUrl = URL.createObjectURL(file);
   const durationSec = await new Promise<number | null>((resolve) => {
     const el = document.createElement("video");
@@ -136,7 +138,63 @@ export async function fileToCapturedVideo(file: File): Promise<CapturedVideo> {
     el.onerror = () => resolve(null);
     el.src = previewUrl;
   });
-  return { dataBase64, mimeType, previewUrl, durationSec };
+  return { blob: file, mimeType, previewUrl, durationSec };
+}
+
+/**
+ * 動画（Blob URL など）から静止画を1枚切り出す。
+ * 動画だけの観察でも AI候補・自動計測が使えるよう、代表画像の材料にする。
+ * 切り出し位置は長さの25%地点（長さが取れない形式では先頭フレーム）。
+ * 対象は同一オリジンで読める URL（Blob URL）に限る。
+ */
+export async function captureFrameFromVideoUrl(
+  src: string,
+): Promise<CapturedImage> {
+  const video = document.createElement("video");
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = "auto";
+  video.src = src;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      video.onloadedmetadata = () => resolve();
+      video.onerror = () =>
+        reject(new Error("動画を読み込めませんでした"));
+    });
+    const duration = video.duration;
+    const target =
+      Number.isFinite(duration) && duration > 0
+        ? Math.min(duration * 0.25, Math.max(0, duration - 0.05))
+        : 0;
+    if (target > 0) {
+      await new Promise<void>((resolve) => {
+        let done = false;
+        const finish = () => {
+          if (done) return;
+          done = true;
+          video.removeEventListener("seeked", finish);
+          resolve();
+        };
+        video.addEventListener("seeked", finish);
+        video.currentTime = target;
+        window.setTimeout(finish, 1500);
+      });
+    } else {
+      // 先頭フレームが描画されるまで少し待つ。
+      await new Promise<void>((resolve) => {
+        if (video.readyState >= 2) {
+          resolve();
+          return;
+        }
+        video.onloadeddata = () => resolve();
+        window.setTimeout(resolve, 1500);
+      });
+    }
+    return await captureFromVideo(video);
+  } finally {
+    video.removeAttribute("src");
+    video.load();
+  }
 }
 
 export type CameraSupport =
