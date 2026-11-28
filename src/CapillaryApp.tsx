@@ -745,6 +745,18 @@ function NewScreen({ go, trialMode }: { go: (v: View) => void; trialMode: boolea
               onChange={setForm}
               autoSummary={buildAutoSummary(form)}
               trialMode={trialMode}
+              measureImageUrl={
+                (images[primaryIndex] ?? images[0])?.previewUrl ?? null
+              }
+              aiImageAvailable={images.length > 0}
+              onAskAi={async () => {
+                // 対象は編集中のドラフトの主画像1枚。画像だけを送る。
+                const img = images[primaryIndex] ?? images[0];
+                if (!img) throw new Error("画像がありません。");
+                return api.analyzeImagePatterns({
+                  image: { dataBase64: img.dataBase64, mimeType: img.mimeType },
+                });
+              }}
             />
           </div>
           {error && (
@@ -1240,6 +1252,21 @@ function EditScreen({
               onChange={setForm}
               autoSummary={buildAutoSummary(form)}
               trialMode={trialMode}
+              measureImageUrl={
+                (obs.images.find((img) => img.isPrimary) ?? obs.images[0])
+                  ?.url ?? null
+              }
+              calibrationUmPerPx={obs.calibrationUmPerPx}
+              aiImageAvailable={obs.images.length > 0}
+              onAskAi={async () => {
+                // 対象は保存済みの主画像1枚（id = Storage パス）。
+                // Storage から読み出して base64 化し、画像だけを送る。
+                const primary =
+                  obs.images.find((img) => img.isPrimary) ?? obs.images[0];
+                if (!primary) throw new Error("画像がありません。");
+                const image = await api.fetchStoredImageInput(primary.id);
+                return api.analyzeImagePatterns({ image });
+              }}
             />
           </div>
 
